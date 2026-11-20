@@ -413,11 +413,12 @@ if __name__ == "__main__":
 
     import lib_data_prep as prep
     import lib_gdp_core  as gdp
+    import config
     from config import CFG
 
     base       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    p_vuelos   = os.path.join(base, 'data', 'raw', 'LEBL_10AUG2025.csv')
-    p_flota    = os.path.join(base, 'data', 'raw', 'fleet_cat_seat.csv')
+    p_vuelos   = config.traffic_file()
+    p_flota    = config.FLEET_TABLE
     carpeta_test = os.path.join(base, 'output', 'figures', 'TEST_VISUALS')
 
     params = CFG.to_params_dict()

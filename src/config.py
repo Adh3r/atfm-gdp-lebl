@@ -6,7 +6,30 @@
 #   from config import CFG, COST_AIR_MIN, ECAC_PREFIXES
 # =============================================================================
 
+import os
 from dataclasses import dataclass
+
+# =============================================================================
+# INPUT FILES
+# =============================================================================
+# The real traffic sample (LEBL arrivals on 10 August 2025) was provided by the
+# course and is not redistributed. When it is present locally it is used;
+# otherwise the simulator falls back to the synthetic day in data/sample/.
+# Set ATFM_TRAFFIC to use any other file with the same layout.
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REAL_TRAFFIC = os.path.join(BASE_DIR, 'data', 'raw', 'LEBL_10AUG2025.csv')
+SAMPLE_TRAFFIC = os.path.join(BASE_DIR, 'data', 'sample', 'synthetic_LEBL_day.csv')
+FLEET_TABLE = os.path.join(BASE_DIR, 'data', 'raw', 'fleet_cat_seat.csv')
+AIRPORT_TABLE = os.path.join(BASE_DIR, 'data', 'raw', 'airports.csv')
+
+
+def traffic_file() -> str:
+    """Path of the traffic CSV to simulate: $ATFM_TRAFFIC, the real day, or the synthetic one."""
+    override = os.environ.get('ATFM_TRAFFIC')
+    if override:
+        return override
+    return REAL_TRAFFIC if os.path.exists(REAL_TRAFFIC) else SAMPLE_TRAFFIC
 
 # =============================================================================
 # GPD parameters in LEBL (BCN EL PRAT)

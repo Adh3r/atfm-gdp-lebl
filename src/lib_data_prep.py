@@ -18,6 +18,7 @@ import re
 import numpy as np
 import pandas as pd
 
+import config
 from config import ECAC_PREFIXES
 from emissions_fuel_model import compute_co2_ask
 
@@ -85,10 +86,10 @@ def preparar_vuelos(
 ) -> pd.DataFrame:
     """
     Args:
-        path_vuelos:      daily flight list CSV (e.g. LEBL_10AUG2025.csv).
+        path_vuelos:      daily flight list CSV (see config.traffic_file()).
         path_flota:       fleet table CSV (fleet_cat_seat.csv).
-        path_aeropuertos: airport coordinates CSV. Defaults to airports.csv
-                          next to the flight list.
+        path_aeropuertos: airport coordinates CSV. Defaults to
+                          config.AIRPORT_TABLE.
 
     Returns:
         Arrivals to LEBL sorted by ETA, with minutes_eta/etd/tt, is_ecac,
@@ -101,7 +102,7 @@ def preparar_vuelos(
     """
     print("   -> Leyendo datos y calculando distancias ortodrómicas...")
     if path_aeropuertos is None:
-        path_aeropuertos = os.path.join(os.path.dirname(path_vuelos), 'airports.csv')
+        path_aeropuertos = config.AIRPORT_TABLE
 
     # -------------------------------------------------------------------------
     # 1. Read the inputs
@@ -195,8 +196,8 @@ if __name__ == "__main__":
     print("🛠️  DEBUG: Testing lib_data_prep.py...")
 
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    p_vuelos = os.path.join(base, 'data/raw/LEBL_10AUG2025.csv')
-    p_flota = os.path.join(base, 'data/raw/fleet_cat_seat.csv')
+    p_vuelos = config.traffic_file()
+    p_flota = config.FLEET_TABLE
     p_debug_out = os.path.join(base, 'debug/DEBUG_01_preprocesado.xlsx')
 
     df_debug = preparar_vuelos(p_vuelos, p_flota)

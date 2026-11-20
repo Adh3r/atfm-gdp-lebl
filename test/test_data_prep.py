@@ -10,11 +10,11 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'src'))
 
+import config  # noqa: E402
 import lib_data_prep as prep  # noqa: E402
 
-RAW = os.path.join(ROOT, 'data', 'raw')
-FLIGHTS = os.path.join(RAW, 'LEBL_10AUG2025.csv')
-FLEET = os.path.join(RAW, 'fleet_cat_seat.csv')
+FLIGHTS = config.REAL_TRAFFIC
+FLEET = config.FLEET_TABLE
 
 
 # -----------------------------------------------------------------------------
@@ -107,11 +107,35 @@ def test_unparseable_time_raises(tmp_path):
 
 
 # -----------------------------------------------------------------------------
-# preparar_vuelos on the real LEBL day
+# preparar_vuelos on the synthetic sample day (always available)
+# -----------------------------------------------------------------------------
+
+@pytest.fixture(scope='module')
+def sample():
+    return prep.preparar_vuelos(config.SAMPLE_TRAFFIC, FLEET)
+
+
+def test_sample_day_is_complete(sample):
+    assert len(sample) == 540
+    assert sample['minutes_eta'].is_monotonic_increasing
+    assert sample[['recat', 'size_seats_avg']].notna().all().all()
+    assert (sample['distancia_km'] > 50).all()
+    assert (sample['co2_kg_vuelo'] > 0).all()
+
+
+def test_sample_day_overloads_the_reduced_capacity(sample):
+    in_window = sample[(sample['minutes_eta'] >= 360) & (sample['minutes_eta'] < 780)]
+    assert len(in_window) / 7 > 20   # more than the 20 arrivals/h available under LVP
+
+
+# -----------------------------------------------------------------------------
+# preparar_vuelos on the real LEBL day (skipped when the file is not present)
 # -----------------------------------------------------------------------------
 
 @pytest.fixture(scope='module')
 def lebl():
+    if not os.path.exists(FLIGHTS):
+        pytest.skip('real traffic file not available (not redistributed)')
     return prep.preparar_vuelos(FLIGHTS, FLEET)
 
 

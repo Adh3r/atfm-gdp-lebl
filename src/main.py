@@ -16,6 +16,7 @@ import lib_visualization as vis
 import lib_intermodal    as inter 
 from lib_metrics         import evaluar_escenario # <-- NUEVO MOTOR DE MÉTRICAS
 
+import config
 from config import CFG, FS_CANDIDATE
 from lib_gdp_core import calcular_retraso_minimo_newell
 from lib_ghp_solver import ejecutar_ghp_completo
@@ -33,9 +34,9 @@ def ejecutar_proyecto_completo() -> None:
     print("═" * 70)
 
     # Rutas
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    PATH_VUELOS_RAW   = os.path.join(BASE_DIR, 'data/raw/LEBL_10AUG2025.csv')
-    PATH_FLOTA_RAW    = os.path.join(BASE_DIR, 'data/raw/fleet_cat_seat.csv')
+    BASE_DIR = config.BASE_DIR
+    PATH_VUELOS_RAW   = config.traffic_file()
+    PATH_FLOTA_RAW    = config.FLEET_TABLE
     PATH_OUTPUT_CSV   = os.path.join(BASE_DIR, 'data/processed/vuelos_finales_gdp.csv')
     PATH_OUTPUT_EXCEL = os.path.join(BASE_DIR, 'data/processed/auditoria_completa.xlsx')
 
@@ -48,6 +49,9 @@ def ejecutar_proyecto_completo() -> None:
     # WP1: PREPARACIÓN DE DATOS
     # -------------------------------------------------------------------------
     print("\n[WP1] Preparando datos y escenario...")
+    print(f"   • Tráfico: {os.path.relpath(PATH_VUELOS_RAW, BASE_DIR)}")
+    if os.path.abspath(PATH_VUELOS_RAW) == os.path.abspath(config.SAMPLE_TRAFFIC):
+        print("   ⚠️  Real traffic file not found: running on the SYNTHETIC sample day.")
     params = CFG.to_params_dict()
     h_start_min = params.get('H_START', 0) # Necesario para evaluar retraso irrecuperable
     df_vuelos = prep.preparar_vuelos(PATH_VUELOS_RAW, PATH_FLOTA_RAW)

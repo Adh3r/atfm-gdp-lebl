@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import milp, Bounds, LinearConstraint #librerias para trabajar con linear programing en python
 
+import config
 from config import (
     CFG,
     COST_AIR_MIN,
@@ -689,8 +690,8 @@ if __name__ == "__main__":
     import lib_data_prep as prep
 
     base     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    p_vuelos = os.path.join(base, 'data/raw/LEBL_10AUG2025.csv')
-    p_flota  = os.path.join(base, 'data/raw/fleet_cat_seat.csv')
+    p_vuelos = config.traffic_file()
+    p_flota  = config.FLEET_TABLE
     p_debug  = os.path.join(base, 'debug/DEBUG_02_etiquetado_gdp.xlsx')
 
     params = CFG.to_params_dict()

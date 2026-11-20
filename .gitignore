@@ -22,3 +22,6 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Real traffic sample provided by the course: used locally, never committed
+data/raw/LEBL_10AUG2025.csv

@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 
 import lib_visualization as vis
+import config
 from config import CFG
 
 
@@ -288,8 +289,8 @@ if __name__ == "__main__":
     params = CFG.to_params_dict()
 
     df_vuelos = prep.preparar_vuelos(
-        os.path.join(base, 'data/raw/LEBL_10AUG2025.csv'),
-        os.path.join(base, 'data/raw/fleet_cat_seat.csv'),
+        config.traffic_file(),
+        config.FLEET_TABLE,
     )
 
     ejecutar_analisis_sensibilidad(df_vuelos, params, base)

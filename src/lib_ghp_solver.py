@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import pulp
  
+import config
 from config import CFG, FS_CANDIDATE
 from emissions_fuel_model import compute_co2_ask
 from cost_model import (
@@ -526,8 +527,8 @@ if __name__ == '__main__':
  
     print("🛠️  MODO DEBUG: lib_ghp_solver.py")
     base     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    p_vuelos = os.path.join(base, 'data/raw/LEBL_10AUG2025.csv')
-    p_flota  = os.path.join(base, 'data/raw/fleet_cat_seat.csv')
+    p_vuelos = config.traffic_file()
+    p_flota  = config.FLEET_TABLE
  
     params    = CFG.to_params_dict()
     df_vuelos = prep.preparar_vuelos(p_vuelos, p_flota)

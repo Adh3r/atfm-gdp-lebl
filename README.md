@@ -39,6 +39,13 @@ Outputs are written to `data/processed/` (CSV tables and `auditoria_completa.xls
 and `output/figures/` (SVG). The scenario parameters (capacities, regulation
 window, radius, file time) live in `src/config.py`.
 
+**Data.** The real traffic day was provided by the course and is not
+redistributed. Out of the box, the simulator runs on a synthetic day with the
+same layout (`data/sample/synthetic_LEBL_day.csv`), so its numbers differ from
+the published results. With access to the original file, place it at
+`data/raw/LEBL_10AUG2025.csv`, or point `ATFM_TRAFFIC` at any CSV with the
+same columns.
+
 ```bash
 python -m pytest test -q        # from the repository root
 ```
@@ -46,7 +53,9 @@ python -m pytest test -q        # from the repository root
 ## Repository layout
 
 ```
-data/raw/         input traffic and fleet tables
+data/raw/         fleet and airport tables (real traffic file goes here, git-ignored)
+data/sample/      synthetic traffic day
+tools/            scripts that rebuild the airport table and the synthetic day
 src/              simulator (main.py is the entry point)
 test/             pytest suite
 data/processed/   generated tables      (git-ignored)

@@ -27,8 +27,14 @@ was published; authorship and dates are unchanged.
   Because this file is GPL-3.0, the whole project is distributed under GPL-3.0.
 - **Delay-cost tables** — A. Cook & G. Tanner, *European airline delay cost
   reference values*, v4.1, University of Westminster for EUROCONTROL, 2015.
-- **Input data** (`data/raw/`) — LEBL arrivals on 10 August 2025 and the fleet
-  category/seat table, provided by the MGTA course for this project.
+- **Traffic data** — the LEBL arrivals of 10 August 2025 used for every result
+  in the project were provided by Prof. Adeline Montlaur (EETAC – UPC) for the
+  MGTA course. They are **not redistributed** in this repository. The
+  simulator runs on a synthetic day instead (`data/sample/`, generated from
+  scratch by `tools/make_synthetic_traffic.py`), and uses the real file when it
+  is placed at `data/raw/LEBL_10AUG2025.csv`.
+- **Fleet table** (`data/raw/fleet_cat_seat.csv`) — RECAT category and average
+  seats per aircraft type, provided with the course material.
 - **Airport coordinates** (`data/raw/airports.csv`) — extracted from
   [OurAirports](https://ourairports.com/data/) (public domain) with
   `tools/build_airport_table.py`.
