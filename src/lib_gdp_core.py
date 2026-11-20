@@ -577,19 +577,21 @@ def ejecutar_nucleo_gdp(
     # PASO 1: Construir las curvas de Newell y encontrar H_NOREG
     timeline, h_noreg = simular_curvas_newell(df_vuelos, params)
 
-    # PASO 2: Clasificar cada vuelo (Controlled, Exempt* o NotAffected)
+    # PASO 2: Clasificar cada vuelo (Controlled, Exempt* o NotAffected).
+    # Only arrivals between Hstart and HNoReg are affected by the regulation.
     df_vuelos_etiquetados = etiquetar_vuelos_gdp(
         df_vuelos,
         h_start=params['H_START'],
         radius_km=radius_km,
         h_file_offset=h_file_offset,
+        h_noreg=h_noreg,
     )
 
-    # PASO 3: Generar la matriz de slots disponibles
-    # Empezamos en H_START y añadimos un slot cada SLOT_RED minutos mientras dura el GDP,
-    # luego cada SLOT_NOM minutos hasta que la cola se disuelve (h_noreg).
-    # El +1000 es un margen de seguridad: generamos slots hasta bien pasado h_noreg
-    # para garantizar que todos los vuelos en cola tengan un slot disponible.
+    # PASO 3: Generar la matriz de slots
+    # From Hstart, one slot every 60/PAAR min until Hend, then every 60/AAR
+    # min. The course builds the slots from Hstart to HNoReg and suggests
+    # adding extra slots after HNoReg for flights that may need them; here the
+    # extra slots run to midnight, and RBS simply leaves the unneeded ones empty.
     lista_slots = []
     tiempo = params['H_START']
     while tiempo < min(h_noreg + 1000, 1440):
@@ -607,7 +609,7 @@ def ejecutar_nucleo_gdp(
 
     # PASO 4: Asignar slots usando el algoritmo RBS
     df_en_ventana = df_vuelos_etiquetados[
-        df_vuelos_etiquetados['minutes_eta'] >= params['H_START']
+        df_vuelos_etiquetados['flight_status'] != FS_NOT_AFFECTED
     ].copy()
 
     # Calculamos SIEMPRE el RBS

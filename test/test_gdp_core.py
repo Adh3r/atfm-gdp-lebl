@@ -13,7 +13,8 @@ sys.path.insert(0, os.path.join(ROOT, 'src'))
 import config  # noqa: E402
 import lib_data_prep as prep  # noqa: E402
 import lib_gdp_core as gdp  # noqa: E402
-from config import CFG, FS_EXEMPT_FLYING, FS_CONTROLLED, FS_EXEMPT_RADIUS, FS_EXEMPT_INTERNATIONAL  # noqa: E402
+from config import (CFG, FS_CONTROLLED, FS_EXEMPT_FLYING, FS_EXEMPT_INTERNATIONAL,  # noqa: E402
+                    FS_EXEMPT_RADIUS, FS_NOT_AFFECTED)
 from cost_model import co2_tierra_kg_por_min  # noqa: E402
 from lib_compression import penalty_and_compression  # noqa: E402
 
@@ -99,6 +100,25 @@ def test_labelling_does_not_modify_input():
     before = df.copy()
     gdp.etiquetar_vuelos_gdp(df, 360)
     pd.testing.assert_frame_equal(df, before)
+
+
+def test_flights_outside_hstart_hnoreg_are_not_affected():
+    df = _flights([
+        ('EARLY', 359.0, 300.0, True, 500.0),
+        ('FIRST', 360.0, 300.0, True, 500.0),
+        ('LAST',  999.0, 900.0, True, 500.0),
+        ('AFTER', 1000.0, 900.0, False, 6000.0),   # non-ECAC, but outside the regulation
+    ])
+    status = gdp.etiquetar_vuelos_gdp(df, 360, h_noreg=1000).set_index('ARCID')['flight_status']
+    assert status.to_dict() == {'EARLY': FS_NOT_AFFECTED, 'FIRST': FS_CONTROLLED,
+                                'LAST': FS_CONTROLLED, 'AFTER': FS_NOT_AFFECTED}
+
+
+def test_ready_to_depart_margin_extends_exempt_flying():
+    h_file = 360 - CFG.H_FILE_OFFSET
+    df = _flights([('READY', 500.0, h_file + 20, True, 800.0)])
+    assert gdp.etiquetar_vuelos_gdp(df, 360)['flight_status'].iat[0] == FS_CONTROLLED
+    assert gdp.etiquetar_vuelos_gdp(df, 360, ready_margin=30)['flight_status'].iat[0] == FS_EXEMPT_FLYING
 
 
 # -----------------------------------------------------------------------------
@@ -236,3 +256,9 @@ def test_full_run_rbs_delay_close_to_newell_bound(gdp_run):
 
 def test_full_run_queue_clears_after_the_regulation(gdp_run):
     assert PARAMS['H_END'] < gdp_run['h_noreg'] < 1440
+
+
+def test_full_run_only_regulates_flights_between_hstart_and_hnoreg(gdp_run):
+    res = gdp_run['vuelos_asignados']
+    assert res['minutes_eta'].between(PARAMS['H_START'], gdp_run['h_noreg'], inclusive='left').all()
+    assert FS_NOT_AFFECTED not in set(res['flight_status'])
