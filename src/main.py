@@ -277,7 +277,7 @@ def ejecutar_proyecto_completo() -> None:
     print("✨ PROCESO COMPLETO FINALIZADO CON ÉXITO ✨")
     print(f"   📄 CSV maestro:          data/processed/vuelos_finales_gdp.csv")
     print(f"   📊 Excel de auditoría:   data/processed/auditoria_completa.xlsx")
-    print(f"   📈 Dashboard KPIs:       data/processed/wp3_comparativa_final.csv")
+    print(f"   📈 Dashboard KPIs:       data/processed/wp3_resumen_ejecutivo.csv")
     print(f"   🚆 Comparativa WP4:      data/processed/wp4_comparativa_intermodal.csv")
     print(f"   🌡️  Matriz sensibilidad: data/processed/sensitivity_grid.csv")
     print("═" * 70 + "\n")
