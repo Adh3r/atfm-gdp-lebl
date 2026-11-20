@@ -4,7 +4,6 @@
 # =============================================================================
 
 import os
-import traceback
 import pandas as pd
 import time
 
@@ -142,36 +141,17 @@ def ejecutar_proyecto_completo() -> None:
     # -------------------------------------------------------------------------
     # WP4: ANÁLISIS INTERMODAL
     # -------------------------------------------------------------------------
-    df_tabla_intermodal = None
-    try:
-        # Pasamos resultados_ghp como tercer argumento
-        resultados_wp4 = inter.ejecutar_analisis_intermodal(df_vuelos, resultados, resultados_ghp, params, BASE_DIR)
-        
-        if isinstance(resultados_wp4, dict):
-            # 1. Capturamos la tabla comparativa para la Pestaña 8
-            df_tabla_intermodal = resultados_wp4['df_comparativa']
-            
-            # 2. Capturamos los resultados del GHP para las DOS funciones de coste
-            df_intermodal_gdp = resultados_wp4['resultados_reducido']['resultados_gdp']['vuelos_asignados']
-            df_intermodal_coste = resultados_wp4['resultados_reducido']['resultados_ghp']['GHP_Cost']
-            df_intermodal_co2 = resultados_wp4['resultados_reducido']['resultados_ghp']['GHP_Emissions']
-            
-            # 3. Los inyectamos en el diccionario general de escenarios
-            escenarios_dict['Intermodal_GDP'] = df_intermodal_gdp
-            escenarios_dict['Intermodal_GHP_Coste'] = df_intermodal_coste
-            escenarios_dict['Intermodal_GHP_CO2'] = df_intermodal_co2
-            
-            # 4. Actualizamos el Dashboard general (WP5)
-            lista_kpis.append(evaluar_escenario(df_intermodal_gdp, 'Intermodal_GDP', h_start_min))
-            lista_kpis.append(evaluar_escenario(df_intermodal_coste, 'Intermodal_GHP_Coste', h_start_min))
-            lista_kpis.append(evaluar_escenario(df_intermodal_co2, 'Intermodal_GHP_CO2', h_start_min))
-            df_dashboard = pd.DataFrame(lista_kpis)
-            
-            print("✅ Datos intermodales procesados y listos para exportar.")
-            
-    except Exception as e:
-        print(f"\n❌ ERROR en WP4. Detalle: {e}")
-        traceback.print_exc()
+    resultados_wp4 = inter.ejecutar_analisis_intermodal(
+        df_vuelos, resultados, resultados_ghp, params, BASE_DIR)
+    df_tabla_intermodal = resultados_wp4['df_comparativa']
+    for nombre, df_esc in resultados_wp4['escenarios_reducidos'].items():
+        escenarios_dict[nombre] = df_esc
+        lista_kpis.append(resultados_wp4['kpis'][nombre])
+    df_dashboard = pd.DataFrame(lista_kpis)
+
+    from generar_graficos_wp4 import generar_graficas_wp4
+    generar_graficas_wp4(resultados, resultados_wp4, os.path.join(BASE_DIR, 'output', 'figures', 'wp4'))
+    print("   ✅ WP4 tables in data/processed/, figures in output/figures/wp4/")
 
     # -------------------------------------------------------------------------
     # WP5: ENTREGABLES (EXCEL y GRÁFICOS)
