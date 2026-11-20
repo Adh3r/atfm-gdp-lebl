@@ -5,8 +5,8 @@
 # CONTEXTO — POR QUÉ EXISTE ESTE MÓDULO:
 #   El GDP tiene dos parámetros de diseño que el controlador puede ajustar:
 #     - R (radio de cobertura):  ¿A qué distancia máxima regulamos vuelos?
-#     - HFile (freeze horizon):  ¿Cuántos minutos antes del GDP consideramos
-#                                 que un vuelo ya "no puede esperar en tierra"?
+#     - Hfile (file time):       ¿Con cuánta antelación respecto a Hstart se publica
+#                                 el GDP? Los vuelos que ya vuelan en Hfile quedan exentos.
 #   Este módulo estudia cómo cambian los KPIs cuando variamos estos parámetros,
 #   y genera heatmaps para visualizar el trade-off entre ellos.
 #
@@ -40,7 +40,7 @@ from config import CFG
 # Modificar estas listas cambia la resolución y el rango del análisis.
 
 RADIOS_KM  = [500, 1000, 1500, 2000, 2500, 3000]    # Radio de cobertura GDP (km)
-HFILE_MINS = [30, 60, 90, 120, 150, 180, 210]        # Freeze horizon HFile (min antes de H_START)
+HFILE_MINS = [30, 60, 90, 120, 150, 180, 210]        # Hstart - Hfile: antelación del file time (min)
 
 
 # =============================================================================
@@ -95,7 +95,7 @@ def _simular_gdp_ligero(
         df_vuelos:       Tabla de vuelos preparada por la Fase 1.
         params:          Parámetros base del GDP (H_START, H_END, AAR, PAAR...).
         radius_km:       Radio de cobertura a probar en esta ejecución.
-        h_file: Freeze horizon a probar en esta ejecución.
+        h_file: Hstart - Hfile (min) a probar en esta ejecución.
 
     Returns:
         Diccionario con los KPIs de esta ejecución, listo para añadir a la tabla.

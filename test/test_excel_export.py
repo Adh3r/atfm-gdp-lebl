@@ -28,7 +28,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import lib_excel_export as excel
-from config import CFG, FS_CANDIDATE, FS_INTERNATIONAL, FS_AIRBORNE, FS_DISTANCE
+from config import CFG, FS_CONTROLLED, FS_EXEMPT_INTERNATIONAL, FS_EXEMPT_FLYING, FS_EXEMPT_RADIUS
 
 
 # =============================================================================
@@ -56,8 +56,8 @@ def _hacer_df_res_minimo() -> pd.DataFrame:
         'air_delay':     [0.0,      0.0,      0.0,      0.0,      0.0],
         'ground_delay':  [5.0,      5.0,      0.0,      10.0,     10.0],
         'flight_status': [
-            FS_CANDIDATE, FS_CANDIDATE, FS_INTERNATIONAL,
-            FS_CANDIDATE, FS_CANDIDATE,
+            FS_CONTROLLED, FS_CONTROLLED, FS_EXEMPT_INTERNATIONAL,
+            FS_CONTROLLED, FS_CONTROLLED,
         ],
     })
 
@@ -210,12 +210,12 @@ class TestColumnasDataFrames(unittest.TestCase):
         definidas en config.py. Si alguien cambia una constante FS_* sin
         actualizar el código que filtra por ella, los filtros dejan de funcionar.
         """
-        from config import FS_CANDIDATE, FS_INTERNATIONAL, FS_AIRBORNE, FS_DISTANCE
+        from config import FS_CONTROLLED, FS_EXEMPT_INTERNATIONAL, FS_EXEMPT_FLYING, FS_EXEMPT_RADIUS
         valores_validos = {
-            FS_CANDIDATE,
-            FS_INTERNATIONAL,
-            FS_AIRBORNE,
-            FS_DISTANCE,
+            FS_CONTROLLED,
+            FS_EXEMPT_INTERNATIONAL,
+            FS_EXEMPT_FLYING,
+            FS_EXEMPT_RADIUS,
         }
         valores_reales = set(self.df_res['flight_status'].unique())
         for valor in valores_reales:

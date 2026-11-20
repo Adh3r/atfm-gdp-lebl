@@ -113,7 +113,7 @@ def generar_heatmap(
     ax.set_xticklabels([f"{int(c)} km"  for c in df_matriz.columns])
     ax.set_yticklabels([f"{int(i)} min" for i in df_matriz.index], rotation=0)
     ax.set_xlabel('GDP Radius of Exemption R (km)',      fontsize=11, fontweight='bold')
-    ax.set_ylabel('T File Offset (min)',          fontsize=11, fontweight='bold')
+    ax.set_ylabel('File time: Hstart − Hfile (min)',          fontsize=11, fontweight='bold')
     ax.set_title(titulo.upper(), fontsize=13, fontweight='bold', pad=20)
 
     # MARCAR LA CELDA ÓPTIMA CON UN RECUADRO AZUL

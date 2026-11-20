@@ -45,28 +45,37 @@ class AirportConfig:
         accident the AAR during the program execution.
 
     TIME UNITS:
-        H_START y H_END expressed in minutes from midnight on UTC.
+        Minutes from midnight UTC.
 
-    PARAMETERS:
-        AAR:             Aircraft Arrival Rate.
-                         how many planes can LEBL accept in nominal conditions.
-        PAAR:            Arrival rate while Low Visibility Procedures.
-        H_START:         initial minute of the GDP.
-        H_END:           end minute GDP.
-        H_NOREG:         minutes window before CTOT.
-                         If a flight took of more H_NOREG minutes before H_START, it is considered AIRBORNE
-                         and remains EXEMPT. Cannot recieve a new CTOT
-        GDP_RADIUS_KM:   Max radius in km that covers the GDP. Flights that 
-                         take off from outside Are EXEMPT. 
-                         
+    PARAMETERS (names as in the MGTA course, after the FAA GDP literature):
+        AAR:             Airport Acceptance Rate: arrivals/hour accepted in
+                         nominal conditions.
+        PAAR:            (GDP) Program Airport Acceptance Rate: arrivals/hour
+                         accepted while the GDP is active (here, low-visibility
+                         procedures).
+        H_START:         Hstart, start time of reduced capacity.
+        H_END:           Hend, end time of reduced capacity.
+        H_FILE_OFFSET:   Hstart - Hfile, i.e. how long before Hstart the GDP is
+                         filed. Hfile (file time) is when the regulation is set
+                         and the slots are sent to the airlines; flights already
+                         flying at Hfile are exempt (ExemptFlying).
+        GDP_RADIUS_KM:   Radius of exemption: flights from origins further away
+                         are exempt (ExemptRadius).
 
+        HNoReg (end time of the regulation, when the queue has dissolved) is
+        not a parameter: it is computed from the Newell curves.
     """
-    AAR:             int = 44    # aircraft/hour nominal
-    PAAR:            int = 20    # aircraft/hout reducede
-    H_START:         int = 360   # 06:00 UTC 
-    H_END:           int = 780   # 13:00 UTC 
-    H_FILE_OFFSET: int = 150     # 2.5 h before H_START
-    GDP_RADIUS_KM:   int = 3000  # radius
+    AAR:             int = 44    # arrivals/hour, nominal
+    PAAR:            int = 20    # arrivals/hour, during the GDP
+    H_START:         int = 360   # 06:00 UTC
+    H_END:           int = 780   # 13:00 UTC
+    H_FILE_OFFSET:   int = 150   # Hfile = Hstart - 150 min = 03:30 UTC
+    GDP_RADIUS_KM:   int = 3000  # radius of exemption
+
+    @property
+    def H_FILE(self) -> int:
+        """Hfile, the file time of the regulation (minutes from midnight UTC)."""
+        return self.H_START - self.H_FILE_OFFSET
 
     @property
     def SLOT_NOM(self) -> float:
@@ -152,10 +161,16 @@ COST_GND_MIN: int = 35
 # Because typos in strings (like 'GPD' instead of 'GDP') fail usually.
 # Using constants triggers a NameError, which is way easier to debug.
 
-FS_CANDIDATE     = 'GDP CANDIDATE'        # Regulated by GDP
-FS_INTERNATIONAL = 'EXEMPT INTERNATIONAL' # Out of ECAC scope
-FS_AIRBORNE      = 'EXEMPT AIRBORNE'      # Already flying when GDP started
-FS_DISTANCE      = 'EXEMPT DISTANCE'      # Too far out to regulate
+#
+# The labels are the flight-status outputs suggested in the course (WP2,
+# "determine flight status"). The delivered project used its own labels
+# (GDP CANDIDATE, EXEMPT AIRBORNE, EXEMPT DISTANCE, EXEMPT INTERNATIONAL).
+
+FS_NOT_AFFECTED         = 'NotAffected'          # ETA before Hstart or at/after HNoReg
+FS_CONTROLLED           = 'Controlled'           # receives ground delay (CTD/CTA)
+FS_EXEMPT_INTERNATIONAL = 'ExemptInternational'  # origin outside the ECAC area
+FS_EXEMPT_FLYING        = 'ExemptFlying'         # already flying at Hfile
+FS_EXEMPT_RADIUS        = 'ExemptRadius'         # origin beyond the radius of exemption
 
 
 # =============================================================================

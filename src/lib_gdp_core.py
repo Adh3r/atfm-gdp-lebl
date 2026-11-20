@@ -30,10 +30,11 @@ from config import (
     CFG,
     COST_AIR_MIN,
     COST_GND_MIN,
-    FS_CANDIDATE,
-    FS_INTERNATIONAL,
-    FS_AIRBORNE,
-    FS_DISTANCE,
+    FS_NOT_AFFECTED,
+    FS_CONTROLLED,
+    FS_EXEMPT_INTERNATIONAL,
+    FS_EXEMPT_FLYING,
+    FS_EXEMPT_RADIUS,
 )
 from cost_model import co2_tierra_kg_por_min
 
@@ -163,84 +164,77 @@ def etiquetar_vuelos_gdp(
     h_start: int,
     radius_km: int  = CFG.GDP_RADIUS_KM,
     h_file_offset: int = CFG.H_FILE_OFFSET,
+    h_noreg: int | None = None,
+    ready_margin: int = 0,
 ) -> pd.DataFrame:
     """
-    Clasifica cada vuelo en una de estas cuatro categorías de regulación:
+    Flight status as defined in the course (WP2, "determine flight status"):
 
-        GPD CANDIDATE        → Podemos retrasarlo en tierra (es el que el GDP controla).
-        EXEMPT INTERNATIONAL → Viene de fuera del espacio aéreo europeo (ECAC).
-                               No podemos obligarle a seguir un CTOT.
-        EXEMPT AIRBORNE      → Ya despegó antes de que activaramos el GDP.
-                               No podemos retrasarlo: ya está en el aire.
-        EXEMPT DISTANCE      → Sale de tan lejos que cuando llega el GDP ya habrá terminado.
-                               El radio de cobertura del GDP no llega a su origen.
+        NotAffected          ETA before Hstart or at/after HNoReg: outside the
+                             regulation, flies as scheduled. Only assigned when
+                             h_noreg is given.
+        ExemptInternational  origin outside the ECAC area.
+        ExemptFlying         already flying when the GDP is defined: ETD earlier
+                             than the file time Hfile (+ ready_margin, for
+                             flights already boarded and ready to depart).
+        ExemptRadius         origin airport further than the radius of exemption.
+        Controlled           everything else: receives ground delay (CTD/CTA).
 
-    el orden importa:
-        Un vuelo intercontinental que ya despegó NO se etiqueta como AIRBORNE,
-        sino como INTERNATIONAL. La categoría ECAC tiene prioridad.
+    Exempt flights take air (holding) delay; controlled flights take ground delay.
 
-    H_FILE:
-        El GDP se publica (file) en T_FILE = H_START - h_file_offset.
-        Un vuelo que ya ha despegado en T_FILE no puede recibir un CTOT y
-        se considera "airborne" a efectos del GDP.
-        Valor del proyecto: 150 minutos (2.5 horas).
+    Priority when several exemptions apply: International, then Flying, then
+    Radius (a long-haul flight already airborne is ExemptInternational).
+
+    Hfile (file time) = h_start - h_file_offset: when the regulation is set and
+    the slots are sent to the airlines. Project value: 150 min (03:30 UTC).
 
     Args:
-        df_vuelos:       Tabla de vuelos con is_ecac, minutes_etd, distancia_km.
-        h_start:         Minuto de inicio del GDP (360 = 06:00).
-        radius_km:       Radio máximo de cobertura del GDP en km (3000 km).
-        h_file_offset:   Minutos entre la publicación del GDP y H_START.
+        df_vuelos:     flights with minutes_eta, minutes_etd, is_ecac, distancia_km.
+        h_start:       Hstart (360 = 06:00 UTC).
+        radius_km:     radius of exemption in km.
+        h_file_offset: Hstart - Hfile, in minutes.
+        h_noreg:       HNoReg; when given, flights outside [Hstart, HNoReg) are
+                       NotAffected.
+        ready_margin:  minutes after Hfile within which a flight counts as ready
+                       to depart and is exempt (the course suggests e.g. 30 min;
+                       the delivered project used 0).
 
     Returns:
-        Copia de df_vuelos con 4 columnas nuevas:
-        is_departed, is_inside_radius, is_gpd_candidate, flight_status.
+        Copy of df_vuelos with is_departed, is_inside_radius, is_controlled and
+        flight_status.
     """
     df = df_vuelos.copy()
+    h_file = h_start - h_file_offset
 
-    # vuelos que despegaron antes de este minuto
-    # ya no pueden recibir un nuevo CTOT (hora de salida asignada).
-    t_file = h_start - h_file_offset
-
-    # --- Tres checks (True/False) por vuelo ---
-
-    # Despegó antes del hfile?
-    df['is_departed'] = df['minutes_etd'] < t_file
-
-    # Su aeropuerto de origen está dentro del radio de cobertura del GDP?
+    # --- Checks per flight ---
+    df['is_departed'] = df['minutes_etd'] < h_file + ready_margin   # flying (or ready) at Hfile
     df['is_inside_radius'] = df['distancia_km'] <= radius_km
+    if h_noreg is None:
+        df['is_affected'] = True
+    else:
+        df['is_affected'] = (df['minutes_eta'] >= h_start) & (df['minutes_eta'] < h_noreg)
 
-    # Es candidato GDP? Solo si cumple las 3 condiciones a la vez:
-    df['is_gpd_candidate'] = (
-        df['is_ecac']            # 1. Origen en espacio aéreo europeo (ECAC)
-        & ~df['is_departed']     # 2. Aún no ha despegado (el ~ invierte True/False)
-        & df['is_inside_radius'] # 3. Dentro del radio de cobertura
+    df['is_controlled'] = (
+        df['is_affected']
+        & df['is_ecac']
+        & ~df['is_departed']
+        & df['is_inside_radius']
     )
 
-    # -------------------------------------------------------------------------
-    # Asignación de etiqueta final usando np.select()
-    #
-    # np.select() es el equivalente con vectores de un if-elif-else aplicado
-    # a toda la columna de una vez.
-    # Evalúa las condiciones en orden: la primera que sea True gana.
-    # Si ninguna condición es True, asigna el valor predeterminado.
-    #
-    #   IF es candidato GDP     → FS_CANDIDATE
-    #   ELIF no es ECAC         → FS_INTERNATIONAL
-    #   ELIF ya despegó         → FS_AIRBORNE
-    #   ELIF fuera del radio    → FS_DISTANCE
-    #   ELSE                    → 'UNKNOWN' --> solo saldra si hubiese algun error
-    # -------------------------------------------------------------------------
+    # np.select evaluates the conditions in order: the first True one wins.
     condiciones = [
-        df['is_gpd_candidate'],   # Condición 1: es regulable
-        ~df['is_ecac'],           # Condición 2: es intercontinental
-        df['is_departed'],        # Condición 3: ya está en el aire
-        ~df['is_inside_radius'],  # Condición 4: demasiado lejos
+        ~df['is_affected'],
+        df['is_controlled'],
+        ~df['is_ecac'],
+        df['is_departed'],
+        ~df['is_inside_radius'],
     ]
     etiquetas = [
-        FS_CANDIDATE,
-        FS_INTERNATIONAL,
-        FS_AIRBORNE,
-        FS_DISTANCE,
+        FS_NOT_AFFECTED,
+        FS_CONTROLLED,
+        FS_EXEMPT_INTERNATIONAL,
+        FS_EXEMPT_FLYING,
+        FS_EXEMPT_RADIUS,
     ]
     df['flight_status'] = np.select(condiciones, etiquetas, default='UNKNOWN')
 
@@ -259,23 +253,26 @@ def asignar_slots_rbs(
     (Ration-By-Schedule).
 
     QUÉ ES RBS:
-        RBS es el algoritmo oficial de Eurocontrol para asignar slots en un GDP.
-        La idea central es: el primero que llega, el priemro que aterriza.
-        Es un sistema FIFO aplicado a los slots disponibles.
+        Ration-By-Schedule is the slot-allocation rule of FAA Ground Delay
+        Programs under Collaborative Decision Making, as taught in the course:
+        arrival slots are rationed in the order of the original schedule (ETA),
+        which is considered fair. EUROCONTROL's Network Manager allocates
+        regulation slots with CASA (Computer Assisted Slot Allocation) on a
+        similar "first planned, first served" basis, issuing CTOTs.
 
     LÓGICA EN DOS PASADAS:
-        PASADA 1 — Vuelos EXENTOS (airborne, internacionales, lejanos):
+        PASADA 1 — Vuelos EXEMPT (ExemptFlying, ExemptInternational, ExemptRadius):
             Estos aviones ya no pueden cambiar su hora de llegada.
             Se les asigna el primer slot disponible >= su ETA original.
             Tienen PRIORIDAD porque no podemos pedirles que esperen.
 
-        PASADA 2 — Vuelos CANDIDATOS GDP:
+        PASADA 2 — Vuelos CONTROLLED:
             Estos aviones pueden ser retrasados en tierra.
             Se les asigna el primer slot disponible tras los exentos.
             Si el slot disponible es posterior a su ETA → hay retraso en tierra.
 
     HAREMOS DOS PASADAS:
-        Si mezcláramos ambos grupos, un candidato GDP podría "robar" el slot
+        Si mezcláramos ambos grupos, un vuelo controlled podría "robar" el slot
         de un exento que llega en ese mismo minuto. Los exentos tienen prioridad
         operacional porque ya no tienen margen de maniobra.
 
@@ -289,13 +286,13 @@ def asignar_slots_rbs(
     df = df_regulados.copy()
     df['assigned_slot'] = np.nan  # Empezamos sin asignar nada
 
-    # Dos pasadas: primero exentos, luego candidatos
-    for procesar_candidatos_gdp in [False, True]:
+    # Dos pasadas: primero exentos, luego controlled
+    for procesar_controlados in [False, True]:
 
-        if procesar_candidatos_gdp:
-            seleccion = df['flight_status'] == FS_CANDIDATE
+        if procesar_controlados:
+            seleccion = df['flight_status'] == FS_CONTROLLED
         else:
-            seleccion = df['flight_status'] != FS_CANDIDATE
+            seleccion = df['flight_status'] != FS_CONTROLLED
 
         # Procesamos los vuelos de este grupo en orden de ETA (más temprano primero)
         for indice_vuelo, datos_vuelo in df[seleccion].sort_values('minutes_eta').iterrows():
@@ -325,38 +322,39 @@ def asignar_slots_rbs(
 
 def calcular_delays(df_res: pd.DataFrame) -> pd.DataFrame:
     """
-    Calcula el retraso de cada vuelo y lo desglosa en dos componentes:
+    Delay of each flight and where it is absorbed (course notation):
 
-        total_delay  = assigned_slot - ETA_original  (retraso total del vuelo)
-        air_delay    = retraso absorbido EN EL AIRE   (solo vuelos EXENTOS)
-        ground_delay = retraso absorbido EN TIERRA    (solo vuelos CANDIDATOS GDP)
+        CTA          = assigned slot             (Controlled Time of Arrival)
+        total_delay  = CTA - ETA
+        air_delay    = total_delay for exempt flights (AirDelay, holding)
+        ground_delay = total_delay for controlled flights (GroundDelay)
+        CTD          = ETD + ground_delay        (Controlled Time of Departure)
 
-    PORQUE SEPARAMOS:
-        Los vuelos EXENTOS no podemos regularlos: si llegan tarde, es retraso
-        en el aire (holding, etc.) que no controlamos.
-        Los vuelos CANDIDATOS GDP esperan en origen antes de despegar: su
-        retraso es en tierra, que es mucho más barato.
+    Exempt flights cannot be held at their origin, so any delay is airborne.
+    Controlled flights wait at the origin gate, which is cheaper.
+    air_delay + ground_delay = total_delay always holds.
 
-        La suma siempre se cumple: air_delay + ground_delay = total_delay
+    CTD/CTA are the FAA/course terms (CTD is also called EDCT). In the European
+    ATFM system the equivalent of the CTD is the CTOT (Calculated Take-Off
+    Time) issued by the Network Manager.
 
-    inputs:
-        df_res: Tabla con 'assigned_slot', 'minutes_eta' y 'flight_status'.
+    Args:
+        df_res: table with 'assigned_slot', 'minutes_eta', 'minutes_etd' and
+                'flight_status'.
 
     Returns:
-        La misma tabla con 3 columnas nuevas: total_delay, air_delay, ground_delay.
+        Copy with CTA, CTD, total_delay, air_delay and ground_delay.
     """
     df = df_res.copy()
 
-    # Retraso total = hora asignada - hora prevista.
-    df['total_delay'] = (df['assigned_slot'] - df['minutes_eta']).clip(lower=0)
+    df['CTA'] = df['assigned_slot']
+    df['total_delay'] = (df['CTA'] - df['minutes_eta']).clip(lower=0)
 
-    # Identificamos qué vuelos son candidatos GDP (True) y cuáles son exentos (False)
-    es_candidato_gdp = df['flight_status'] == FS_CANDIDATE
-
-    # Vuelos EXENTOS: su retraso es en el aire
-    # Vuelos CANDIDATOS: su retraso es en tierra
-    df['air_delay']    = np.where(~es_candidato_gdp, df['total_delay'], 0)
-    df['ground_delay'] = np.where( es_candidato_gdp, df['total_delay'], 0)
+    controlado = df['flight_status'] == FS_CONTROLLED
+    df['air_delay']    = np.where(~controlado, df['total_delay'], 0)
+    df['ground_delay'] = np.where( controlado, df['total_delay'], 0)
+    if 'minutes_etd' in df.columns:
+        df['CTD'] = df['minutes_etd'] + df['ground_delay']
 
     return df
 
@@ -458,7 +456,7 @@ def calcular_retraso_irrecuperable(df_res: pd.DataFrame, h_cancel: float = CFG.H
     Unrecoverable ground delay per flight if the GDP were cancelled at h_cancel
     (the project assumes cancellation at H_START).
 
-    CTD (calculated take-off) = ETD + ground_delay.
+    CTD (Controlled Time of Departure) = ETD + ground_delay.
         CASE 1  ETD >= h_cancel:        the flight had not reached its departure
                                         time yet -> nothing lost (0).
         CASE 2  CTD <= h_cancel:        it already took off after absorbing all of
@@ -579,7 +577,7 @@ def ejecutar_nucleo_gdp(
     # PASO 1: Construir las curvas de Newell y encontrar H_NOREG
     timeline, h_noreg = simular_curvas_newell(df_vuelos, params)
 
-    # PASO 2: Clasificar cada vuelo (candidato GDP o exento, y por qué)
+    # PASO 2: Clasificar cada vuelo (Controlled, Exempt* o NotAffected)
     df_vuelos_etiquetados = etiquetar_vuelos_gdp(
         df_vuelos,
         h_start=params['H_START'],

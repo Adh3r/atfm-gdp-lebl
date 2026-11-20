@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(ROOT, 'src'))
 import config  # noqa: E402
 import lib_data_prep as prep  # noqa: E402
 import lib_gdp_core as gdp  # noqa: E402
-from config import CFG, FS_AIRBORNE, FS_CANDIDATE, FS_DISTANCE, FS_INTERNATIONAL  # noqa: E402
+from config import CFG, FS_EXEMPT_FLYING, FS_CONTROLLED, FS_EXEMPT_RADIUS, FS_EXEMPT_INTERNATIONAL  # noqa: E402
 from cost_model import co2_tierra_kg_por_min  # noqa: E402
 from lib_compression import penalty_and_compression  # noqa: E402
 
@@ -23,7 +23,7 @@ PARAMS = CFG.to_params_dict()
 def _flights(rows):
     """rows: (id, eta, etd, is_ecac, distance_km[, status]) -> minimal flight table."""
     cols = ['ARCID', 'minutes_eta', 'minutes_etd', 'is_ecac', 'distancia_km', 'flight_status']
-    rows = [r if len(r) == 6 else (*r, FS_CANDIDATE) for r in rows]
+    rows = [r if len(r) == 6 else (*r, FS_CONTROLLED) for r in rows]
     df = pd.DataFrame(rows, columns=cols)
     df['airline'] = df['ARCID'].str[:3]
     return df
@@ -82,16 +82,16 @@ def test_exemption_categories_and_priority():
     ])
     status = gdp.etiquetar_vuelos_gdp(df, PARAMS['H_START']).set_index('ARCID')['flight_status']
     assert status.to_dict() == {
-        'CAN': FS_CANDIDATE, 'AIR': FS_AIRBORNE, 'FAR': FS_DISTANCE,
-        'INT': FS_INTERNATIONAL, 'INA': FS_INTERNATIONAL,
+        'CAN': FS_CONTROLLED, 'AIR': FS_EXEMPT_FLYING, 'FAR': FS_EXEMPT_RADIUS,
+        'INT': FS_EXEMPT_INTERNATIONAL, 'INA': FS_EXEMPT_INTERNATIONAL,
     }
 
 
 def test_exemption_parameters_are_honoured():
     df = _flights([('X', 500.0, 300.0, True, 1200.0)])
-    assert gdp.etiquetar_vuelos_gdp(df, 360, radius_km=1000)['flight_status'].iat[0] == FS_DISTANCE
-    assert gdp.etiquetar_vuelos_gdp(df, 360, h_file_offset=30)['flight_status'].iat[0] == FS_AIRBORNE
-    assert gdp.etiquetar_vuelos_gdp(df, 360, h_file_offset=150)['flight_status'].iat[0] == FS_CANDIDATE
+    assert gdp.etiquetar_vuelos_gdp(df, 360, radius_km=1000)['flight_status'].iat[0] == FS_EXEMPT_RADIUS
+    assert gdp.etiquetar_vuelos_gdp(df, 360, h_file_offset=30)['flight_status'].iat[0] == FS_EXEMPT_FLYING
+    assert gdp.etiquetar_vuelos_gdp(df, 360, h_file_offset=150)['flight_status'].iat[0] == FS_CONTROLLED
 
 
 def test_labelling_does_not_modify_input():
@@ -107,8 +107,8 @@ def test_labelling_does_not_modify_input():
 
 def test_rbs_gives_exempt_flights_priority():
     df = _flights([
-        ('CAN', 360.0, 0, True, 500, FS_CANDIDATE),
-        ('EXE', 361.0, 0, False, 5000, FS_INTERNATIONAL),
+        ('CAN', 360.0, 0, True, 500, FS_CONTROLLED),
+        ('EXE', 361.0, 0, False, 5000, FS_EXEMPT_INTERNATIONAL),
     ])
     res = gdp.asignar_slots_rbs(df, _slots([362, 365]))
     slots = res.set_index('ARCID')['assigned_slot']
@@ -129,7 +129,7 @@ def test_rbs_leaves_flight_unassigned_when_no_slot_left():
 
 
 def test_delay_split_air_for_exempt_ground_for_candidates():
-    df = _flights([('CAN', 360.0, 0, True, 500, FS_CANDIDATE), ('EXE', 360.0, 0, False, 5000, FS_INTERNATIONAL)])
+    df = _flights([('CAN', 360.0, 0, True, 500, FS_CONTROLLED), ('EXE', 360.0, 0, False, 5000, FS_EXEMPT_INTERNATIONAL)])
     df['assigned_slot'] = [370.0, 365.0]
     res = gdp.calcular_delays(df).set_index('ARCID')
     assert res.loc['CAN', ['total_delay', 'ground_delay', 'air_delay']].tolist() == [10, 10, 0]

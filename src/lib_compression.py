@@ -4,7 +4,7 @@
 # 4. Sorting: Stay with FIFO for the time.
 import pandas as pd
 import numpy as np
-from config import FS_CANDIDATE
+from config import FS_CONTROLLED
 
 def penalty_and_compression(df_vuelos_asignados: pd.DataFrame, num_penalizados: int = 12) -> pd.DataFrame:
     """
@@ -20,10 +20,10 @@ def penalty_and_compression(df_vuelos_asignados: pd.DataFrame, num_penalizados: 
     """
     df = df_vuelos_asignados.copy()
 
-    # Only penalize the flights we can regulate (FS_CANDIDATE). 
+    # Only penalize the flights we can regulate (FS_CONTROLLED). 
     # EXEMPTS cannot be touched.
 
-    candidatos = df[df['flight_status'] == FS_CANDIDATE]
+    candidatos = df[df['flight_status'] == FS_CONTROLLED]
     
     if candidatos.empty:
         return df # Nothing to compress
@@ -62,12 +62,12 @@ def penalty_and_compression(df_vuelos_asignados: pd.DataFrame, num_penalizados: 
         # Finding flights that can jump into this slot:
         # 1. Already have a later slot (assigned_slot > t_slot)
         # 2. ETA allows them to make it on time (ETA <= t_slot)
-        # 3. Must be FS_CANDIDATE (don't touch exempt flights)
+        # 3. Must be FS_CONTROLLED (don't touch exempt flights)
         elegibles = df[
             (df['assigned_slot'] > t_slot) & 
             (df['minutes_eta'] <= t_slot) & 
             (df['assigned_slot'].notna()) &
-            (df['flight_status'] == FS_CANDIDATE)
+            (df['flight_status'] == FS_CONTROLLED)
         ]
 
         if elegibles.empty:

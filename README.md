@@ -62,6 +62,27 @@ data/processed/   generated tables      (git-ignored)
 output/figures/   generated figures     (git-ignored)
 ```
 
+## Terminology
+
+The code and outputs follow the vocabulary of the MGTA course, which teaches
+ground delay programs in their FAA/CDM formulation (Ball et al.). European
+ATFM uses different names for the same ideas:
+
+| Course / this project | Meaning | European ATFM (EUROCONTROL NM) |
+|---|---|---|
+| GDP, Ground Delay Program | arrival regulation enforced by holding flights at their origin | ATFM arrival regulation |
+| RBS, Ration-By-Schedule | slots rationed in order of scheduled arrival | CASA (Computer Assisted Slot Allocation), "first planned, first served" |
+| AAR / PAAR | (Program) Airport Acceptance Rate, arrivals per hour, nominal / during the GDP | regulation rate |
+| Hstart / Hend | start / end of reduced capacity | regulation period |
+| Hfile, file time | when the regulation is set and slots are sent to airlines | regulation publication; slot (SAM) sent at EOBT − 2 h |
+| HNoReg | end of the regulation: the queue has dissolved | — |
+| CTD (EDCT) / CTA | Controlled Time of Departure / of Arrival | CTOT (Calculated Take-Off Time) / CTA |
+| Controlled | flight that receives ground delay | regulated flight |
+| ExemptFlying / ExemptInternational / ExemptRadius | exempt: airborne at Hfile / non-ECAC origin / beyond the radius | flights not subject to the regulation |
+| NotAffected | ETA outside [Hstart, HNoReg) | — |
+| GHP, Ground Holding Problem | slot assignment as an integer programme with costs c<sub>ft</sub> = r<sub>f</sub>(t)·(t − ETA<sub>f</sub>) | — (research model) |
+| Unrecoverable delay | ground delay already absorbed if the GDP is cancelled at Hstart | — |
+
 ## Authors
 
 Dènia Cabrera, Adam Ruiz Herrero and Josep Ponz. Developed as a team project for

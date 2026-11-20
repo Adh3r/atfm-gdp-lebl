@@ -53,3 +53,19 @@ C4 quotes the figures obtained with the original distance model.
 - **Speed.** Penalty-and-compression ran inside every one of the 42
   sensitivity simulations and the WP4 re-simulation without being used; it now
   runs once. Full pipeline 208 s → 169 s.
+
+## Terminology
+
+Names were checked against the course material (GDP and GHP lectures, project
+statement WP1–WP5) and aligned with it. A glossary with the European ATFM
+equivalents is in the README.
+
+| Before | After | Why |
+|---|---|---|
+| Status labels `GDP CANDIDATE`, `EXEMPT AIRBORNE`, `EXEMPT DISTANCE`, `EXEMPT INTERNATIONAL` | `Controlled`, `ExemptFlying`, `ExemptRadius`, `ExemptInternational` (+ `NotAffected`) | The flight-status outputs named in the course (WP2, "determine flight status"). The report calls controlled flights "GDP CANDIDATES". |
+| `AAR`: "Aircraft Arrival Rate"; `PAAR`: "arrival rate while LVP" | Airport Acceptance Rate / (GDP) Program Airport Acceptance Rate | Course definitions. |
+| `H_NOREG` described as "minutes window before CTOT"; exemption argument `h_noreg` | `H_FILE_OFFSET` = Hstart − Hfile; argument `h_file_offset`; `CFG.H_FILE` | Hfile is the file time; HNoReg is the computed end of the regulation. The two were conflated. |
+| "Freeze horizon HFile", heatmap axis "T File Offset" | file time, axis "Hstart − Hfile (min)" | Course wording ("file time (Hfile)"). |
+| "CTD (Calculated Take-Off Time)" | CTD = Controlled Time of Departure (EDCT); European equivalent CTOT | The course defines CTD/CTA as controlled times; "Calculated Take-Off Time" is the CTOT. |
+| "RBS is EUROCONTROL's official algorithm" | RBS is the FAA/CDM GDP rule taught in the course; EUROCONTROL uses CASA | Factual correction. |
+| — | Output columns `CTA` and `CTD` | Course WP2 asks for the CTA of every flight. |

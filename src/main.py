@@ -17,7 +17,7 @@ import lib_intermodal    as inter
 from lib_metrics         import evaluar_escenario # <-- NUEVO MOTOR DE MÉTRICAS
 
 import config
-from config import CFG, FS_CANDIDATE
+from config import CFG, FS_CONTROLLED
 from lib_gdp_core import calcular_retraso_minimo_newell
 from lib_ghp_solver import ejecutar_ghp_completo
 
@@ -69,7 +69,7 @@ def ejecutar_proyecto_completo() -> None:
     df_final = resultados['vuelos_asignados']
     df_slots = resultados['slots']
     slots_list = list(df_slots['slot_start_min'])
-    candidatos = df_final[df_final['flight_status'] == FS_CANDIDATE]
+    candidatos = df_final[df_final['flight_status'] == FS_CONTROLLED]
     
     print(f"   • Vuelos regulados (GDP): {len(candidatos)}")
     print(f"   • Vuelos exentos:         {len(df_final) - len(candidatos)}")

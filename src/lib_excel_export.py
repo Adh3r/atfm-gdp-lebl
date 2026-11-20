@@ -11,7 +11,7 @@ from openpyxl.utils import get_column_letter
 
 # Importes de configuración (asegúrate de que coincidan con tus rutas)
 try:
-    from config import COST_AIR_MIN, COST_GND_MIN, FS_CANDIDATE
+    from config import COST_AIR_MIN, COST_GND_MIN, FS_CONTROLLED
 except ImportError:
     pass # Fallback por si ejecutas de forma aislada
 

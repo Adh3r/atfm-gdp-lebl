@@ -17,7 +17,7 @@ import pandas as pd
 import pulp
  
 import config
-from config import CFG, FS_CANDIDATE
+from config import CFG, FS_CONTROLLED
 from emissions_fuel_model import compute_co2_ask
 from cost_model import (
     FEGP_KW_PER_RECAT, GRID_EMISSION_FACTOR_KG_KWH, LOAD_FACTOR_EU,
@@ -64,7 +64,7 @@ def calcular_rf_unitario(df_vuelos: pd.DataFrame) -> pd.Series:
  
 def calcular_rf_emisiones(df_vuelos: pd.DataFrame) -> pd.Series:
     def _apply_co2(fila):
-        if fila.get('flight_status') == FS_CANDIDATE:
+        if fila.get('flight_status') == FS_CONTROLLED:
             recat_str = str(fila.get('recat', 'D')).upper()
             potencia_kw = FEGP_KW_PER_RECAT.get(recat_str, 72.0)
             co2_fegp_min = potencia_kw * (1 / 60.0) * GRID_EMISSION_FACTOR_KG_KWH
@@ -249,8 +249,8 @@ def ejecutar_ghp_completo(
     h_start       = params['H_START']
     df_en_ventana = df_enriched[df_enriched['minutes_eta'] >= h_start].copy()
  
-    df_candidatos = df_en_ventana[df_en_ventana['flight_status'] == FS_CANDIDATE].copy()
-    df_exentos    = df_en_ventana[df_en_ventana['flight_status'] != FS_CANDIDATE].copy()
+    df_candidatos = df_en_ventana[df_en_ventana['flight_status'] == FS_CONTROLLED].copy()
+    df_exentos    = df_en_ventana[df_en_ventana['flight_status'] != FS_CONTROLLED].copy()
  
     if verbose:
         print(f"   GHP: {len(df_candidatos)} candidatos, {len(df_exentos)} exentos")
