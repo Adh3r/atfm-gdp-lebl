@@ -10,6 +10,8 @@
 #   - Convert times (HH:MM[:SS] -> minutes from midnight UTC)
 #   - Tag ECAC origins and extract the airline designator
 #   - Great-circle distance from the origin airport, and baseline CO2
+#   - Scheduled turnaround of each arrival: ground time until the next
+#     departure of the same aircraft (registration mark, RM) from LEBL
 # =============================================================================
 
 import os
@@ -93,14 +95,15 @@ def preparar_vuelos(
 
     Returns:
         Arrivals to LEBL sorted by ETA, with minutes_eta/etd/tt, is_ecac,
-        airline, distancia_km (great circle), co2_kg_vuelo and
-        duracion_vuelo_min.
+        airline, distancia_km (great circle), co2_kg_vuelo,
+        duracion_vuelo_min and tat_programado_min (scheduled turnaround,
+        NaN when the aircraft does not depart again from LEBL that day).
 
     Raises:
         ValueError: if a time cannot be parsed or an origin airport has no
                     coordinates.
     """
-    print("   -> Leyendo datos y calculando distancias ortodrómicas...")
+    print("   -> Reading traffic and computing great-circle distances...")
     if path_aeropuertos is None:
         path_aeropuertos = config.AIRPORT_TABLE
 
@@ -123,8 +126,12 @@ def preparar_vuelos(
         raise ValueError(f"Conflicting fleet entries for aircraft types: {dup}")
 
     # -------------------------------------------------------------------------
-    # 2. Arrivals to LEBL only (LEBL->LEBL local circuits are dropped)
+    # 2. Arrivals to LEBL only (LEBL->LEBL local circuits are dropped). The
+    #    departures are kept aside to compute the turnarounds (step 8).
     # -------------------------------------------------------------------------
+    salidas = df_vuelos[
+        (df_vuelos['ADEP'] == AIRPORT) & (df_vuelos['ADES'] != AIRPORT)
+    ][['RM', 'ETD']].copy()
     df_vuelos = df_vuelos[
         (df_vuelos['ADES'] == AIRPORT) & (df_vuelos['ADEP'] != AIRPORT)
     ].copy()
@@ -188,12 +195,53 @@ def preparar_vuelos(
 
     df_vuelos['co2_kg_vuelo'] = df_vuelos.apply(_calcular_co2_vuelo, axis=1)
 
+    # -------------------------------------------------------------------------
+    # 8. Scheduled turnaround (WP3: reactionary delay)
+    # -------------------------------------------------------------------------
+    df_vuelos['tat_programado_min'] = turnaround_programado(df_vuelos, salidas)
+
     # The GDP engine expects chronological arrival order.
     return df_vuelos.sort_values('minutes_eta', kind='stable').reset_index(drop=True)
 
+
+def turnaround_programado(llegadas: pd.DataFrame, salidas: pd.DataFrame) -> pd.Series:
+    """Scheduled ground time of each arrival before its aircraft departs again.
+
+    For each arrival, the first departure from LEBL of the same registration
+    (RM) at or after its ETA, provided the aircraft does not arrive again in
+    between (otherwise a leg is missing from the file and the pair is not a
+    turnaround). NaN when there is no such departure (night stop) or no RM.
+
+    Args:
+        llegadas: arrivals with RM and minutes_eta.
+        salidas:  departures from LEBL with RM and ETD (HH:MM[:SS]).
+    """
+    tat = pd.Series(np.nan, index=llegadas.index)
+    if 'RM' not in llegadas.columns or salidas.empty:
+        return tat
+    dep = salidas.dropna(subset=['RM']).copy()
+    dep['etd'] = dep['ETD'].apply(parse_time_to_minutes)
+    dep = dep.dropna(subset=['etd'])
+    salidas_por_rm = {rm: np.sort(g['etd'].to_numpy()) for rm, g in dep.groupby('RM')}
+
+    llegadas_rm = llegadas.dropna(subset=['RM']).sort_values('minutes_eta', kind='stable')
+    siguiente_llegada = llegadas_rm.groupby('RM')['minutes_eta'].shift(-1)
+    for idx, fila in llegadas_rm.iterrows():
+        etds = salidas_por_rm.get(fila['RM'])
+        if etds is None:
+            continue
+        k = np.searchsorted(etds, fila['minutes_eta'], side='left')
+        if k == len(etds):
+            continue
+        prox = siguiente_llegada.loc[idx]
+        if pd.notna(prox) and prox <= etds[k]:
+            continue
+        tat.loc[idx] = etds[k] - fila['minutes_eta']
+    return tat
+
 # --- DEBUG MODE ---
 if __name__ == "__main__":
-    print("🛠️  DEBUG: Testing lib_data_prep.py...")
+    print("DEBUG: lib_data_prep.py")
 
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     p_vuelos = config.traffic_file()
@@ -205,5 +253,4 @@ if __name__ == "__main__":
     os.makedirs(os.path.dirname(p_debug_out), exist_ok=True)
     df_debug.to_excel(p_debug_out, index=False)
 
-    print(f"✅ Success! Enriched {len(df_debug)} flights.")
-    print(f"📍 Output: {p_debug_out}")
+    print(f"Prepared {len(df_debug)} arrivals -> {p_debug_out}")

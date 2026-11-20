@@ -71,7 +71,7 @@ def identificar_vuelos_substituibles(df_vuelos: pd.DataFrame, verbose: bool = Tr
     if verbose:
         n = int(df['es_substituible'].sum())
         pct = n / len(df) * 100 if len(df) else 0
-        print(f"\n 🚄 INTERMODAL: {n} rail-replaceable flights ({pct:.1f}% of {len(df)})")
+        print(f"\n   Intermodal: {n} rail-replaceable flights ({pct:.1f}% of {len(df)})")
     return df
 
 
@@ -148,7 +148,7 @@ def ejecutar_analisis_intermodal(
     tables and the re-simulation results.
     """
     print("\n" + "=" * 80)
-    print("🚄 WP4: INTERMODALITY — REPLACING SHORT FLIGHTS BY HIGH-SPEED RAIL")
+    print("[WP4] Intermodality: replacing short flights with high-speed rail")
     print("=" * 80)
     h_start = params['H_START']
 
@@ -194,9 +194,9 @@ def ejecutar_analisis_intermodal(
         'System CO2: flights + delay + rail (kg)': {n: round(v, 1) for n, v in co2_sistema.items()},
     })
 
-    print(f"   • Replaced flights (within the regulation): {len(sustituidos)}")
-    print(f"   • HNoReg: {resultados_base['h_noreg']} -> {red['resultados_gdp']['h_noreg']} min UTC")
-    print(f"   • Direct CO2 saving of the substitution: "
+    print(f"   Replaced flights (within the regulation): {len(sustituidos)}")
+    print(f"   HNoReg: {resultados_base['h_noreg']} -> {red['resultados_gdp']['h_noreg']} min UTC")
+    print(f"   Direct CO2 saving of the substitution: "
           f"{co2_vuelos_sustituidos - co2_tren:,.0f} kg (flights {co2_vuelos_sustituidos:,.0f} - rail {co2_tren:,.0f})")
     print(df_comp.to_string(index=False))
 

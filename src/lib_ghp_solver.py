@@ -28,9 +28,13 @@
 #                 delay as RBS (Task 1 validation; not a scenario to report:
 #                 every slot permutation of the same slots is optimal).
 #     emissions   c_ft = e_f (t - ETA_f), e_f = ground CO2 per minute (FEGP).
-#     cost        c_ft = Cook & Tanner at-gate tactical cost of the delay,
-#                 primary below 15 min and full (with reactionary) from 15 min,
-#                 scaled by the flight's real passengers.
+#     cost        c_ft = cost of delay of flight f arriving at t (cost_model):
+#                 Cook & Tanner at-gate primary cost of the delay, plus the
+#                 reactionary cost of the part of the delay that exceeds the
+#                 turnaround buffer of the aircraft's next rotation (computed
+#                 from its registration mark), scaled by real passengers.
+#                 Short delays absorbed by the turnaround cost little; long
+#                 delays that propagate cost much more, as WP3 Task 3 asks.
 # =============================================================================
 
 import os
@@ -41,13 +45,13 @@ from scipy.optimize import linear_sum_assignment
 
 from config import FS_CONTROLLED, FS_NOT_AFFECTED
 from cost_model import (
-    _mapear_tipo_cook, co2_tierra_kg_por_min, coste_tabla_vec,
-    factor_pasajeros,
+    DEFAULT_COST_BASE, _tipo_y_factor, co2_tierra_kg_por_min, coste_primario_vec,
+    coste_reactivo_vec, coste_vuelo_vec, holgura_rotacion,
 )
 from lib_gdp_core import calcular_delays
 
-# Maximum feasible air (holding) delay for exempt flights. Project choice,
-# from EUROCONTROL turnaround/holding references plus a 20 min margin (report).
+# Maximum feasible air (holding) delay for exempt flights (WP3 Task 1). Project
+# choice, justified in the report; the result is checked in every run.
 MAX_AIR_DELAY_MIN = 90
 
 # Maximum ground delay for controlled flights (WP3 Task 1: "very high ground
@@ -97,11 +101,14 @@ def matriz_costes(
     slots: np.ndarray,
     objetivo: str,
     max_ground_delay: float | None = MAX_GROUND_DELAY_MIN,
+    base: str = DEFAULT_COST_BASE,
+    mtt_extra: float = 0.0,
 ) -> np.ndarray:
     """c_ft for every controlled flight f and free slot t.
 
     Forbidden (infinite cost) when t < ETA_f, or when t - ETA_f exceeds
-    max_ground_delay.
+    max_ground_delay. base and mtt_extra select the cost model of the cost
+    objective (cost_model.coste_vuelo_vec), for the sensitivity analysis.
     """
     if objetivo not in OBJETIVOS:
         raise ValueError(f"objetivo must be one of {OBJETIVOS}")
@@ -117,11 +124,10 @@ def matriz_costes(
         c = e_f[:, None] * d
     else:  # cost
         c = np.empty_like(d)
+        holgura = holgura_rotacion(df_controlados, mtt_extra).to_numpy(dtype=float)
         for i, (_, fila) in enumerate(df_controlados.iterrows()):
-            asientos = fila.get('size_seats_avg', 180)
-            asientos = 180 if pd.isna(asientos) else asientos
-            tipo = _mapear_tipo_cook(fila.get('ATYP', ''), fila.get('recat', 'D'), int(asientos))
-            c[i] = coste_tabla_vec(tipo, d[i], 'at_gate') * factor_pasajeros(tipo, asientos)
+            tipo, fpax = _tipo_y_factor(fila)
+            c[i] = coste_vuelo_vec(tipo, fpax, d[i], 0.0, holgura[i], base)
 
     if max_ground_delay is not None:
         factible &= delay <= max_ground_delay + 1e-9
@@ -138,6 +144,8 @@ def resolver_ghp(
     slots_disponibles,
     objetivo: str,
     max_ground_delay: float | None = MAX_GROUND_DELAY_MIN,
+    base: str = DEFAULT_COST_BASE,
+    mtt_extra: float = 0.0,
 ) -> pd.DataFrame:
     """
     Solve one GHP instance and return the affected flights with their CTA,
@@ -157,7 +165,7 @@ def resolver_ghp(
     if len(df_ctrl):
         if len(libres) < len(df_ctrl):
             raise RuntimeError("Fewer free slots than controlled flights.")
-        coste = matriz_costes(df_ctrl, libres, objetivo, max_ground_delay)
+        coste = matriz_costes(df_ctrl, libres, objetivo, max_ground_delay, base, mtt_extra)
         filas, columnas = linear_sum_assignment(coste)
         if (coste[filas, columnas] >= _PROHIBIDO).any():
             raise RuntimeError(
@@ -200,6 +208,70 @@ def ejecutar_ghp_completo(
 
 
 # =============================================================================
+# SENSITIVITY OF THE COST OBJECTIVE (WP3 Task 3: "vary the values of r_f")
+# =============================================================================
+
+def _rsd_aerolineas(df: pd.DataFrame, top_n: int = 4) -> float:
+    top = df['airline'].value_counts().head(top_n).index
+    medias = df[df['airline'].isin(top)].groupby('airline')['total_delay'].mean()
+    return float(medias.std(ddof=0) / medias.mean() * 100) if medias.mean() > 0 else 0.0
+
+
+SENSITIVITY_MODELS = [
+    ('primary', 0.0, 'Primary only'),
+    ('rotation', 0.0, 'Rotation (default)'),
+    ('full', 0.0, "Cook 'full' (network average)"),
+    ('rotation', -10.0, 'Rotation, MTT -10 min'),
+    ('rotation', 15.0, 'Rotation, MTT +15 min'),
+]
+
+
+def sensibilidad_coste(
+    df_rbs: pd.DataFrame,
+    slots_disponibles,
+    max_ground_delay: float | None = MAX_GROUND_DELAY_MIN,
+) -> pd.DataFrame:
+    """
+    Re-solve the cost GHP with each cost model and evaluate every solution
+    under all of them.
+
+    Cost models (cost_model.coste_vuelo_vec): primary only, rotation (the
+    default), Cook's network-average 'full', and rotation with the minimum
+    turnaround times shifted by -10 / +15 min.
+
+    Returns one row per solution (RBS first) with its cost under each model,
+    the saving against RBS under the model it was optimised for, the maximum
+    delay and the airline fairness index.
+    """
+    from cost_model import costes_por_vuelo
+
+    df = df_rbs[df_rbs['flight_status'] != FS_NOT_AFFECTED]
+
+    def coste(sol, base, mtt):
+        return costes_por_vuelo(sol, base=base, mtt_extra=mtt)['coste_retraso_eur'].sum()
+
+    soluciones = [('GDP (RBS)', None, df)]
+    for base, mtt, nombre in SENSITIVITY_MODELS:
+        soluciones.append((f'GHP cost, optimised on: {nombre}', (base, mtt),
+                           resolver_ghp(df, slots_disponibles, 'cost', max_ground_delay, base, mtt)))
+
+    filas = []
+    for nombre, modelo, sol in soluciones:
+        fila = {'Solution': nombre}
+        for base, mtt, etiqueta in SENSITIVITY_MODELS:
+            fila[f'Cost, {etiqueta} (EUR)'] = round(coste(sol, base, mtt), 0)
+        if modelo is not None:
+            ref = coste(df, *modelo)
+            fila['Saving vs RBS, own model (%)'] = round((ref - coste(sol, *modelo)) / ref * 100, 1)
+        else:
+            fila['Saving vs RBS, own model (%)'] = 0.0
+        fila['Max delay (min)'] = round(sol['total_delay'].max(), 1)
+        fila['Airline fairness RSD (%)'] = round(_rsd_aerolineas(sol), 1)
+        filas.append(fila)
+    return pd.DataFrame(filas)
+
+
+# =============================================================================
 # WP3 FIGURES
 # =============================================================================
 
@@ -207,7 +279,8 @@ def generar_graficas_wp3(escenarios: dict, out_dir: str, top_n: int = 4) -> list
     """
     WP3 figures (SVG), saved in out_dir:
       1. delay CO2 by airline in the emissions scenario (air vs ground);
-      2. Cook & Tanner at-gate cost of delay vs delay for five aircraft types;
+      2. cost of delay vs delay for an A320: primary only, with the reactionary
+         cost of a tight and of a loose turnaround, and Cook's network average;
       3. mean delay per airline: GDP vs both GHP scenarios (fairness).
 
     escenarios: {'GDP': df, 'GHP_Emissions': df, 'GHP_Cost': df}
@@ -240,12 +313,18 @@ def generar_graficas_wp3(escenarios: dict, out_dir: str, top_n: int = 4) -> list
     # --- 2. Cost of delay curves ---
     delays = np.linspace(0, 300, 601)
     fig, ax = plt.subplots(figsize=(9, 5))
-    for tipo in ('A320', 'B738', 'E190', 'A332', 'B744'):
-        ax.plot(delays, coste_tabla_vec(tipo, delays, 'at_gate') / 1000, label=tipo, linewidth=1.8)
-    ax.axvline(15, color='gray', linestyle='--', linewidth=1, label='OTP threshold (15 min)')
-    ax.set_xlabel('Delay (min)')
+    prim = coste_primario_vec('A320', delays, 'at_gate')
+    curvas = (
+        ('Primary only (no knock-on)', prim, '#4A6FA5', '-'),
+        ('Turnaround buffer 15 min', prim + coste_reactivo_vec('A320', np.clip(delays - 15, 0, None)), '#E67E22', '-'),
+        ('Turnaround buffer 60 min', prim + coste_reactivo_vec('A320', np.clip(delays - 60, 0, None)), '#2ECC71', '-'),
+        ("Cook & Tanner 'full' (network average)", prim + coste_reactivo_vec('A320', delays), 'gray', '--'),
+    )
+    for etiqueta, y, color, estilo in curvas:
+        ax.plot(delays, y / 1000, label=etiqueta, color=color, linestyle=estilo, linewidth=1.8)
+    ax.set_xlabel('Ground delay (min)')
     ax.set_ylabel('Cost of delay (k€, 2014)')
-    ax.set_title('At-gate tactical cost of delay — Cook & Tanner (2015), base scenario')
+    ax.set_title('Cost of delay of an A320 (Cook & Tanner 2015, at gate, base scenario)')
     ax.legend()
     fig.tight_layout()
     rutas.append(os.path.join(out_dir, 'fig2_cost_of_delay_curves.svg'))

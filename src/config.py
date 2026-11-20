@@ -1,9 +1,9 @@
 # =============================================================================
 # src/config.py
-#all constant used in project
+# Project-wide constants: input files, GDP parameters, ECAC prefixes and
+# flight-status labels.
 #
-# import constants from another file:
-#   from config import CFG, COST_AIR_MIN, ECAC_PREFIXES
+#   from config import CFG, ECAC_PREFIXES
 # =============================================================================
 
 import os
@@ -32,17 +32,16 @@ def traffic_file() -> str:
     return REAL_TRAFFIC if os.path.exists(REAL_TRAFFIC) else SAMPLE_TRAFFIC
 
 # =============================================================================
-# GPD parameters in LEBL (BCN EL PRAT)
+# GDP parameters at LEBL (Barcelona-El Prat)
 # =============================================================================
 
 @dataclass(frozen=True)
 class AirportConfig:
     """
-    Parameters of Ground Delay Program in LEBL.
+    Parameters of the Ground Delay Program at LEBL.
 
-    DATACLASS FROZEN:
-        frozen=True values can't be changed once created. Avoids modifying it by 
-        accident the AAR during the program execution.
+    frozen=True: the values cannot be changed once created, so no module can
+    modify, say, the AAR by accident during a run.
 
     TIME UNITS:
         Minutes from midnight UTC.
@@ -61,6 +60,11 @@ class AirportConfig:
                          flying at Hfile are exempt (ExemptFlying).
         GDP_RADIUS_KM:   Radius of exemption: flights from origins further away
                          are exempt (ExemptRadius).
+        READY_MARGIN:    flights due to depart less than this after Hfile are
+                         considered ready to depart (boarded, doors closed) and
+                         exempt as ExemptFlying. The course suggests 30 min
+                         ("consider a margin, 30 min for example"); the
+                         delivered project used 0.
 
         HNoReg (end time of the regulation, when the queue has dissolved) is
         not a parameter: it is computed from the Newell curves.
@@ -71,6 +75,7 @@ class AirportConfig:
     H_END:           int = 780   # 13:00 UTC
     H_FILE_OFFSET:   int = 150   # Hfile = Hstart - 150 min = 03:30 UTC
     GDP_RADIUS_KM:   int = 3000  # radius of exemption
+    READY_MARGIN:    int = 30    # min after Hfile: flights ready to depart are exempt
 
     @property
     def H_FILE(self) -> int:
@@ -80,14 +85,14 @@ class AirportConfig:
     @property
     def SLOT_NOM(self) -> float:
         """
-        airport covers 44aircraft/h → 1 aircraft each 60/44 = 1.36 min.
+        Nominal slot interval: AAR 44 arrivals/h -> one slot every 60/44 = 1.36 min.
         """
         return 60 / self.AAR
 
     @property
     def SLOT_RED(self) -> float:
         """
-        Airport covers 20 aircraft/h → 1 aircraft each 60/20 = 3 min.
+        Reduced slot interval: PAAR 20 arrivals/h -> one slot every 60/20 = 3 min.
         """
         return 60 / self.PAAR
 
@@ -114,14 +119,16 @@ class AirportConfig:
 
 
 # =============================================================================
-# OACI PREFIXES OF ECAC AIRPORTS
+# ICAO LOCATION-INDICATOR PREFIXES OF THE ECAC STATES
 # =============================================================================
-# ECAC: European Civil Aviation Conference
+# ECAC: European Civil Aviation Conference (44 member states). The first two
+# letters of an ICAO airport code identify the state (LE = Spain, with GC for
+# the Canary Islands and GE for Ceuta and Melilla).
 #
-# First two characters of OACI idetify the region of procedence. The ones down are the EUROPE ones.
-#
-# Only flights that are taking off from ECAC can recieve CTOT.
-# INTERNATIONAL are outside the European law.
+# Following the course, a flight from outside the ECAC area is exempt
+# (ExemptInternational): in the European ATFM system, flights departing from
+# outside the area where the Network Manager issues slots (CTOTs) cannot be
+# held on the ground by a regulation.
 
 ECAC_PREFIXES: tuple = tuple([
     'EB', 'ED', 'EE', 'EF', 'EG', 'EH', 'EI', 'EK', 'EL', 'EN', 'EP',
@@ -131,20 +138,6 @@ ECAC_PREFIXES: tuple = tuple([
     'BI', 'GC', 'GE', 'UD', 'UG', 'UK', 'UB',
 ])
 
-
-# =============================================================================
-# ECONOMIC CONSTANTS
-# =============================================================================
-# Source: University of Westminster / Eurocontrol,
-#   "European airline delay cost reference values", v4.1, 2015.
-#
-# Cost of delay per minute in EUR
-# In flight: The expensive. Fuel + crew + handling compensations.
-COST_AIR_MIN: int = 100  
-
-# On ground: Much cheaper. The whole point of GDP is to keep them
-# parked instead of burning fuel in a holding pattern.
-COST_GND_MIN: int = 35
 
 # =============================================================================
 # CO2 EMISSION MODEL

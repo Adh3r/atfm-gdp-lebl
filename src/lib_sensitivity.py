@@ -1,25 +1,13 @@
 # =============================================================================
 # src/lib_sensitivity.py
-# FASE 4: Análisis de sensibilidad — ¿Cuáles son los valores óptimos de R y HFile?
+# WP2 - Sensitivity of the GDP to its two design parameters:
+#   - the radius of exemption R (flights from further away are exempt);
+#   - the file time Hfile, set by Hstart - Hfile (flights already flying at
+#     Hfile are exempt).
 #
-# CONTEXTO — POR QUÉ EXISTE ESTE MÓDULO:
-#   El GDP tiene dos parámetros de diseño que el controlador puede ajustar:
-#     - R (radio de cobertura):  ¿A qué distancia máxima regulamos vuelos?
-#     - Hfile (file time):       ¿Con cuánta antelación respecto a Hstart se publica
-#                                 el GDP? Los vuelos que ya vuelan en Hfile quedan exentos.
-#   Este módulo estudia cómo cambian los KPIs cuando variamos estos parámetros,
-#   y genera heatmaps para visualizar el trade-off entre ellos.
-#
-# METODOLOGÍA — BÚSQUEDA EN CUADRÍCULA (Grid Search):
-#   Ejecutamos la simulación GDP completa para cada combinación posible de
-#   (R, HFile) dentro de los rangos definidos en RADIOS_KM y HFILE_MINS.
-#   Con 6 radios × 7 valores de HFile = 42 simulaciones en total.
-#   El resultado es una tabla 6×7 por KPI, que se visualiza como heatmap.
-#
-# SEPARACIÓN DE RESPONSABILIDADES:
-#   - Este módulo SOLO gestiona la cuadrícula y recoge los KPIs.
-#   - Los heatmaps los dibuja lib_visualization.generar_heatmap().
-#   - La simulación GDP la ejecuta lib_gdp_core.ejecutar_nucleo_gdp().
+# Grid search: the full GDP is simulated for every (R, Hstart - Hfile) pair in
+# RADIOS_KM x HFILE_MINS (6 x 7 = 42 runs). Each KPI becomes a 6 x 7 matrix,
+# drawn as a heatmap by lib_visualization.generar_heatmap().
 # =============================================================================
 
 import os
@@ -28,45 +16,34 @@ import warnings
 import numpy as np
 import pandas as pd
 
-import lib_visualization as vis
 import config
+import lib_visualization as vis
 from config import CFG
 
+# =============================================================================
+# PARAMETER GRID
+# =============================================================================
+
+RADIOS_KM  = [500, 1000, 1500, 2000, 2500, 3000]    # radius of exemption (km)
+HFILE_MINS = [30, 60, 90, 120, 150, 180, 210]        # Hstart - Hfile (min)
 
 # =============================================================================
-# CUADRÍCULA DE PARÁMETROS A EXPLORAR
+# HEATMAPS: (column, title, unit, 'min' | 'max' = which value is best)
 # =============================================================================
-# Estos son los valores que vamos a probar para cada parámetro.
-# Modificar estas listas cambia la resolución y el rango del análisis.
-
-RADIOS_KM  = [500, 1000, 1500, 2000, 2500, 3000]    # Radio de cobertura GDP (km)
-HFILE_MINS = [30, 60, 90, 120, 150, 180, 210]        # Hstart - Hfile: antelación del file time (min)
-
-
-# =============================================================================
-# DEFINICIÓN DE LOS HEATMAPS A GENERAR
-# =============================================================================
-# Cada entrada es una tupla con:
-#   (nombre_columna_en_df, título_del_gráfico, unidad, 'min'/'max')
-#
-# 'min' significa que el valor MENOR es el mejor (ej: menos retraso = mejor).
-# 'max' significa que el valor MAYOR es el mejor (ej: más ahorro = mejor).
-# La función de heatmap usa esto para colorear y marcar la celda óptima.
 
 HEATMAPS = [
-    # --- KPIs exigidos explícitamente en el enunciado ---
+    # KPIs asked for in the statement
     ('air_delay_total',     'Trade-off: Total AIR Delay',               'min', 'min'),
     ('co2_tierra_delay',    'CO2 Emissions Due to GROUND Delay',        'kg',  'min'),
     ('co2_aire_delay',      'CO2 Emissions Due to AIR Delay',           'kg',  'min'),
     ('unrecoverable_delay', 'Unrecoverable Delay (GDP cancelled)',      'min', 'min'),
-    # --- KPIs de valor añadido (aportación del equipo) ---
+    # additional KPIs
     ('co2_savings',         'Net CO2 Savings vs. Do-Nothing',           'kg',  'max'),
     ('cost_savings',        'Total Economic Savings vs. Do-Nothing',    'EUR', 'max'),
 ]
 
-
 # =============================================================================
-# MOTOR DE SIMULACIÓN LIGERO — UNA EJECUCIÓN POR CELDA DE LA CUADRÍCULA
+# ONE GDP RUN PER GRID CELL
 # =============================================================================
 
 def _simular_gdp_ligero(
@@ -76,34 +53,19 @@ def _simular_gdp_ligero(
     h_file: int,
 ) -> dict:
     """
-    Ejecuta la simulación GDP completa para una combinación (R, HFile) concreta
-    y devuelve solo los KPIs necesarios para los heatmaps.
+    Run the GDP for one (R, Hstart - Hfile) pair and return the heatmap KPIs.
 
-    POR QUÉ NO DUPLICAMOS LA LÓGICA DE SIMULACIÓN AQUÍ:
-        La simulación GDP ya está implementada en ejecutar_nucleo_gdp().
-        En lugar de copiar ese código, simplemente la llamamos con los parámetros
-        que queremos probar. Así, si corregimos un bug en ejecutar_nucleo_gdp(),
-        el análisis de sensibilidad se beneficia automáticamente.
-
-    POR QUÉ EL IMPORT ESTÁ DENTRO DE LA FUNCIÓN (no al principio del archivo):
-        lib_sensitivity importa lib_gdp_core, y lib_gdp_core podría importar
-        lib_sensitivity en el futuro. Si ambos se importan al principio,
-        Python entra en un bucle infinito (import circular).
-        Poner el import dentro de la función evita ese problema.
+    It reuses ejecutar_nucleo_gdp() (without compression), so the sensitivity
+    analysis always runs exactly the same engine as the main scenario.
 
     Args:
-        df_vuelos:       Tabla de vuelos preparada por la Fase 1.
-        params:          Parámetros base del GDP (H_START, H_END, AAR, PAAR...).
-        radius_km:       Radio de cobertura a probar en esta ejecución.
-        h_file: Hstart - Hfile (min) a probar en esta ejecución.
-
-    Returns:
-        Diccionario con los KPIs de esta ejecución, listo para añadir a la tabla.
+        df_vuelos: prepared flights (WP1).
+        params:    GDP parameters (H_START, H_END, AAR, PAAR, ...).
+        radius_km: radius of exemption for this run.
+        h_file:    Hstart - Hfile (min) for this run.
     """
-    # Import local para evitar circularidad (ver explicación arriba)
-    from lib_gdp_core import ejecutar_nucleo_gdp, calcular_kpis_economicos
+    from lib_gdp_core import calcular_kpis_economicos, ejecutar_nucleo_gdp
 
-    # Ejecutamos la simulación GDP completa con los parámetros de esta celda
     resultados = ejecutar_nucleo_gdp(
         df_vuelos,
         params,
@@ -111,13 +73,9 @@ def _simular_gdp_ligero(
         h_file_offset=h_file,
         run_compression=False,
     )
-
     df_resultado = resultados['vuelos_asignados']
-    kpis         = calcular_kpis_economicos(df_resultado, params['H_START'])
+    kpis = calcular_kpis_economicos(df_resultado, params['H_START'])
 
-
-    # Devolvemos solo los KPIs que necesitamos para los heatmaps
-    # (no toda la tabla de vuelos, para ahorrar memoria en las 42 ejecuciones)
     return {
         'radius_km':           radius_km,
         'h_file':              h_file,
@@ -129,9 +87,8 @@ def _simular_gdp_ligero(
         'co2_tierra_delay':    kpis['co2_tierra_delay'],
     }
 
-
 # =============================================================================
-# ORQUESTADOR PRINCIPAL
+# ORCHESTRATOR
 # =============================================================================
 
 def ejecutar_analisis_sensibilidad(
@@ -140,157 +97,63 @@ def ejecutar_analisis_sensibilidad(
     base_dir: str,
 ) -> pd.DataFrame:
     """
-    Ejecuta el análisis de sensibilidad completo:
-
-        1. Itera sobre todas las combinaciones (R, HFile) de la cuadrícula.
-        2. Para cada combinación, simula el GDP y recoge los KPIs.
-        3. Construye una tabla con todos los resultados (42 filas).
-        4. Para cada KPI, pivota la tabla en una matriz 6×7 y genera un heatmap.
-        5. Guarda la tabla completa en un CSV para análisis posterior.
-
-    QUÉ ES "PIVOTAR" UNA TABLA:
-        La tabla de resultados tiene una fila por simulación (42 filas) con columnas
-        radius_km, h_file, air_delay_total, etc.
-        Para dibujar un heatmap necesitamos una MATRIZ donde:
-            - Las filas son los valores de HFile  (eje Y del heatmap)
-            - Las columnas son los valores de R   (eje X del heatmap)
-            - Cada celda contiene el valor del KPI para esa combinación
-        df.pivot() hace exactamente esa transformación de tabla a matriz.
+    Run the 42-cell grid, draw one heatmap per KPI (rows: Hstart - Hfile,
+    columns: R, best cell highlighted) and save the grid to
+    data/processed/sensitivity_grid.csv.
 
     Args:
-        df_vuelos: Tabla de vuelos preparada por la Fase 1.
-        params:    Parámetros base del GDP.
-        base_dir:  Ruta raíz del proyecto (para construir rutas de salida).
+        df_vuelos: prepared flights (WP1).
+        params:    GDP parameters.
+        base_dir:  project root.
 
     Returns:
-        DataFrame con los resultados de las 42 simulaciones.
+        DataFrame with one row per run.
     """
     carpeta_heatmaps = os.path.join(base_dir, 'output', 'figures', 'heatmaps')
-    total_simulaciones = len(RADIOS_KM) * len(HFILE_MINS)
-
-    print(f"\n[SENSIBILIDAD] Ejecutando cuadrícula "
-          f"{len(RADIOS_KM)} radios × {len(HFILE_MINS)} HFile = {total_simulaciones} simulaciones...")
-
-    # -------------------------------------------------------------------------
-    # BUCLE PRINCIPAL: EJECUTAR UNA SIMULACIÓN POR CELDA DE LA CUADRÍCULA
-    # -------------------------------------------------------------------------
-    # Iteramos sobre todos los radios y, para cada radio, sobre todos los HFile.
-    # enumerate() nos da tanto el índice (i, j) como el valor (radio, hfile)
-    # del elemento actual, lo cual usamos para mostrar el progreso.
-    #
-    # warnings.catch_warnings() + simplefilter("ignore") suprime los warnings
-    # de pandas durante la simulación (ej: SettingWithCopyWarning). Los
-    # suprimimos aquí porque son advertencias que ya conocemos y hemos decidido
-    # ignorar, y mostrarlas 42 veces ensuciaría la consola innecesariamente.
+    total = len(RADIOS_KM) * len(HFILE_MINS)
+    print(f"   Grid: {len(RADIOS_KM)} radii x {len(HFILE_MINS)} file times = {total} GDP runs")
 
     lista_resultados = []
-
     for i, radio in enumerate(RADIOS_KM):
         for j, hfile in enumerate(HFILE_MINS):
-
+            # pandas chained-assignment warnings are known and would be printed 42 times
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 resultado_celda = _simular_gdp_ligero(df_vuelos, params, radio, hfile)
-
             lista_resultados.append(resultado_celda)
+            n = i * len(HFILE_MINS) + j + 1
+            print(f"   [{n:02d}/{total}] R={radio:4d} km  Hstart-Hfile={hfile:3d} min  "
+                  f"air delay={resultado_celda['air_delay_total']:.0f} min", end='\r')
+    print()
 
-            # Mostramos el progreso en consola con \r (retorno de carro):
-            # \r mueve el cursor al inicio de la línea SIN hacer salto de línea,
-            # de modo que el siguiente print sobreescribe la misma línea.
-            # Esto crea el efecto de "barra de progreso" en la terminal.
-            numero_actual = i * len(HFILE_MINS) + j + 1
-            print(
-                f"   [{numero_actual:02d}/{total_simulaciones}] "
-                f"R={radio:4d} km  HFile={hfile:3d} min  "
-                f"→ air_delay={resultado_celda['air_delay_total']:.0f} min",
-                end='\r'
-            )
-
-    print()  # Salto de línea después del último \r para no sobreescribir el resumen
-
-    # Convertimos la lista de diccionarios en un DataFrame (una fila por simulación)
     df_cuadricula = pd.DataFrame(lista_resultados)
 
-    # -------------------------------------------------------------------------
-    # GENERAR UN HEATMAP POR CADA KPI
-    # -------------------------------------------------------------------------
-    print(f"   Generando {len(HEATMAPS)} heatmaps...")
-
     for nombre_kpi, titulo, unidad, mejor in HEATMAPS:
-
-        # PIVOTAR: transformar la tabla lineal en una matriz 2D para el heatmap.
-        # index='h_file' → las filas del heatmap serán los valores de HFile
-        # columns='radius_km'     → las columnas del heatmap serán los valores de R
-        # values=nombre_kpi       → el valor en cada celda es el KPI que estamos analizando
-        df_matriz = df_cuadricula.pivot(
-            index='h_file',
-            columns='radius_km',
-            values=nombre_kpi,
-        )
-
-        # Imprimir en consola TODAS las matrices
-        print(f"\n📊 --- MATRIZ EXACTA: {titulo.upper()} ({unidad}) ---")
+        df_matriz = df_cuadricula.pivot(index='h_file', columns='radius_km', values=nombre_kpi)
+        print(f"\n   {titulo} ({unidad}); rows Hstart - Hfile (min), columns R (km)")
         print(df_matriz.round(1).to_string())
-        print("-" * 60)
 
-        # Encontrar la celda con el valor óptimo (mínimo o máximo según el KPI)
         valores = df_matriz.values.astype(float)
+        plano = np.argmin(valores) if mejor == 'min' else np.argmax(valores)
+        fila, columna = np.unravel_index(plano, valores.shape)
 
-        if mejor == 'min':
-            # np.argmin() devuelve la posición del mínimo en el array aplanado (1D)
-            # np.unravel_index() convierte esa posición 1D en coordenadas (fila, columna)
-            indice_optimo = np.unravel_index(np.argmin(valores), valores.shape)
-        else:
-            indice_optimo = np.unravel_index(np.argmax(valores), valores.shape)
+        ruta = os.path.join(carpeta_heatmaps, f"heatmap_{nombre_kpi.replace('_', '-')}.svg")
+        vis.generar_heatmap(df_matriz, titulo, unidad, mejor, ruta, int(fila), int(columna))
 
-        # Construimos la ruta de salida del PNG
-        nombre_archivo = nombre_kpi.replace('_', '-')
-        ruta_png = os.path.join(carpeta_heatmaps, f"heatmap_{nombre_archivo}.svg")
-
-        # Llamamos a la función de visualización con todos los datos preparados
-        vis.generar_heatmap(
-            df_matriz,
-            titulo,
-            unidad,
-            mejor,
-            ruta_png,
-            int(indice_optimo[0]),  # Fila del óptimo (índice de HFile)
-            int(indice_optimo[1]),  # Columna del óptimo (índice de R)
-            # _r invierte la paleta: rojo=alto (malo), verde=bajo (bueno)
-        )
-
-    # -------------------------------------------------------------------------
-    # GUARDAR LA TABLA COMPLETA EN CSV
-    # -------------------------------------------------------------------------
-    # Guardamos todos los resultados de las 42 simulaciones en un CSV.
-    # Esto permite análisis posteriores sin necesidad de re-ejecutar todo.
     ruta_csv = os.path.join(base_dir, 'data', 'processed', 'sensitivity_grid.csv')
     os.makedirs(os.path.dirname(ruta_csv), exist_ok=True)
     df_cuadricula.to_csv(ruta_csv, index=False)
-
-    print(f"   → CSV con los 42 resultados: data/processed/sensitivity_grid.csv")
-    print(f"   → Heatmaps: output/figures/heatmaps/ ({len(HEATMAPS)} imágenes PNG)")
+    print(f"\n   Grid: data/processed/sensitivity_grid.csv; heatmaps: output/figures/heatmaps/")
 
     return df_cuadricula
 
 
 # =============================================================================
-# MODO DEBUG — Ejecutar directamente para probar este módulo de forma aislada.
-#   cd src/
-#   python lib_sensitivity.py
+# DEBUG MODE: python src/lib_sensitivity.py
 # =============================================================================
 if __name__ == "__main__":
     import lib_data_prep as prep
 
-    print("🛠️  MODO DEBUG: lib_sensitivity.py")
-
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-    params = CFG.to_params_dict()
-
-    df_vuelos = prep.preparar_vuelos(
-        config.traffic_file(),
-        config.FLEET_TABLE,
-    )
-
-    ejecutar_analisis_sensibilidad(df_vuelos, params, base)
+    df_vuelos = prep.preparar_vuelos(config.traffic_file(), config.FLEET_TABLE)
+    ejecutar_analisis_sensibilidad(df_vuelos, CFG.to_params_dict(), base)

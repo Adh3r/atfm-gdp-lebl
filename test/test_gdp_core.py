@@ -15,6 +15,7 @@ import lib_data_prep as prep  # noqa: E402
 import lib_gdp_core as gdp  # noqa: E402
 from config import (CFG, FS_CONTROLLED, FS_EXEMPT_FLYING, FS_EXEMPT_INTERNATIONAL,  # noqa: E402
                     FS_EXEMPT_RADIUS, FS_NOT_AFFECTED)
+import cost_model  # noqa: E402
 from cost_model import co2_tierra_kg_por_min  # noqa: E402
 from lib_compression import penalty_and_compression  # noqa: E402
 
@@ -117,8 +118,17 @@ def test_flights_outside_hstart_hnoreg_are_not_affected():
 def test_ready_to_depart_margin_extends_exempt_flying():
     h_file = 360 - CFG.H_FILE_OFFSET
     df = _flights([('READY', 500.0, h_file + 20, True, 800.0)])
-    assert gdp.etiquetar_vuelos_gdp(df, 360)['flight_status'].iat[0] == FS_CONTROLLED
+    assert gdp.etiquetar_vuelos_gdp(df, 360, ready_margin=0)['flight_status'].iat[0] == FS_CONTROLLED
     assert gdp.etiquetar_vuelos_gdp(df, 360, ready_margin=30)['flight_status'].iat[0] == FS_EXEMPT_FLYING
+    # the default follows the course suggestion (30 min)
+    assert CFG.READY_MARGIN == 30
+    assert gdp.etiquetar_vuelos_gdp(df, 360)['flight_status'].iat[0] == FS_EXEMPT_FLYING
+
+
+def test_flight_that_left_the_previous_day_is_exempt_flying():
+    # ETD later than ETA: the flight departed the day before (statement, WP1).
+    df = _flights([('OVERNIGHT', 400.0, 1380.0, True, 1500.0)])
+    assert gdp.etiquetar_vuelos_gdp(df, 360)['flight_status'].iat[0] == FS_EXEMPT_FLYING
 
 
 # -----------------------------------------------------------------------------
@@ -181,7 +191,12 @@ def test_kpis_use_fegp_for_ground_co2():
     assert k['co2_aire_delay'] == pytest.approx(10 * 9000 / 90, abs=0.01)
     # do-nothing puts all 40 min in the air at each flight's cruise rate
     assert k['co2_savings'] == pytest.approx(30 * 6000 / 60 - 30 * co2_tierra_kg_por_min('D'), abs=0.01)
-    assert k['cost_savings'] == pytest.approx(30 * (config.COST_AIR_MIN - config.COST_GND_MIN))
+    # cost: the same Cook & Tanner model as WP3; holding 30 min at the gate
+    # instead of en route saves the en-route minus at-gate primary cost
+    tipo, fpax = cost_model._tipo_y_factor(df.iloc[0])
+    ahorro = (cost_model.coste_primario_vec(tipo, [30.0], 'en_route')
+              - cost_model.coste_primario_vec(tipo, [30.0], 'at_gate'))[0] * fpax
+    assert k["cost_savings"] == pytest.approx(ahorro, abs=0.01)
 
 
 # -----------------------------------------------------------------------------

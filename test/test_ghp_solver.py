@@ -117,22 +117,102 @@ def test_infeasible_instance_raises():
 # Cost model
 # -----------------------------------------------------------------------------
 
-@pytest.mark.parametrize('fase', ['at_gate', 'en_route'])
-def test_cost_of_delay_never_decreases_with_delay(fase):
+@pytest.mark.parametrize('base', cost_model.COST_BASES)
+@pytest.mark.parametrize('holgura', [np.nan, 0.0, 40.0])
+def test_cost_of_delay_never_decreases_with_delay(base, holgura):
     d = np.linspace(0, 400, 4001)
     for tipo in cost_model._PAX_BASE_TABLE:
-        c = cost_model.coste_tabla_vec(tipo, d, fase)
-        assert (np.diff(c) >= -1e-9).all(), tipo
-        assert c[0] == 0
+        for fase_aire in (False, True):
+            g, a = (np.zeros_like(d), d) if fase_aire else (d, 0.0)
+            c = cost_model.coste_vuelo_vec(tipo, 1.0, g, a, holgura, base)
+            assert (np.diff(c) >= -1e-9).all(), (tipo, base)
+            assert c[0] == 0
 
 
 def test_cost_tables_match_cook_and_tanner_reference_values():
-    # Spot checks against Cook & Tanner (2015), Tables 22, 26 and 28.
-    assert cost_model._coste_tabla('A320', 5, 'at_gate') == 90       # primary, at gate
-    assert cost_model._coste_tabla('A320', 60, 'at_gate') == 8350    # full, at gate
-    assert cost_model._coste_tabla('B744', 300, 'en_route') == 343600
+    # Spot checks against Cook & Tanner (2015), Tables 22, 24, 26 and 28.
+    prim = cost_model.coste_primario_vec
+    assert prim('A320', [5], 'at_gate')[0] == 90           # Table 22
+    assert prim('A320', [60], 'en_route')[0] == 6650       # Table 24
+    full = cost_model.coste_vuelo_vec
+    assert full('A320', 1.0, [60.0], base='full')[0] == 8350                      # Table 26
+    assert full('B744', 1.0, 0.0 * np.ones(1), [300.0], base='full')[0] == 343600  # Table 28
     # beyond 300 min the last segment is extended
-    assert cost_model._coste_tabla('A320', 360, 'at_gate') == pytest.approx(105380 + (105380 - 78890))
+    assert prim('A320', [360], 'at_gate')[0] == pytest.approx(67820 + (67820 - 46430))
+
+
+def test_reactionary_cost_is_the_same_at_gate_and_en_route():
+    # Cook & Tanner cost all reactionary delay at the gate, so full - primary
+    # must coincide in the at-gate and en-route tables (up to rounding).
+    for tipo in cost_model._PAX_BASE_TABLE:
+        g = np.subtract(cost_model._COOK_TACTICAL[('at_gate', 'full')][tipo],
+                        cost_model._COOK_TACTICAL[('at_gate', 'primary')][tipo])
+        e = np.subtract(cost_model._COOK_TACTICAL[('en_route', 'full')][tipo],
+                        cost_model._COOK_TACTICAL[('en_route', 'primary')][tipo])
+        assert np.abs(g - e).max() <= 10, tipo
+
+
+def test_rotation_cost_sits_between_primary_and_full():
+    d = np.linspace(0, 300, 301)
+    for holgura in (0.0, 30.0, 90.0, np.nan):
+        p = cost_model.coste_vuelo_vec('A320', 1.0, d, base='primary')
+        r = cost_model.coste_vuelo_vec('A320', 1.0, d, 0.0, holgura, 'rotation')
+        f = cost_model.coste_vuelo_vec('A320', 1.0, d, base='full')
+        assert (p <= r + 1e-9).all() and (r <= f + 1e-9).all()
+    # no buffer: every minute propagates, as in Cook's network average
+    assert np.allclose(cost_model.coste_vuelo_vec('A320', 1.0, d, 0.0, 0.0, 'rotation'),
+                       cost_model.coste_vuelo_vec('A320', 1.0, d, base='full'))
+    # night stop (no later rotation): primary only
+    assert np.allclose(cost_model.coste_vuelo_vec('A320', 1.0, d, 0.0, np.nan, 'rotation'),
+                       cost_model.coste_vuelo_vec('A320', 1.0, d, base='primary'))
+
+
+def test_delay_absorbed_by_the_turnaround_does_not_propagate():
+    assert cost_model.retraso_propagado([20.0, 50.0, 80.0], 50.0).tolist() == [0.0, 0.0, 30.0]
+    assert cost_model.retraso_propagado([80.0], np.nan).tolist() == [0.0]
+
+
+def test_turnaround_buffer_uses_minimum_turnaround_by_category():
+    df = pd.DataFrame({'recat': ['D', 'B', 'D', 'D'], 'tat_programado_min': [60.0, 60.0, 20.0, np.nan]})
+    h = cost_model.holgura_rotacion(df)
+    assert h.iloc[0] == 60 - cost_model.MIN_TURNAROUND_MIN['narrow']
+    assert h.iloc[1] == 0          # wide-body: 60 min < 80 min minimum
+    assert h.iloc[2] == 0          # scheduled below the minimum: no buffer
+    assert np.isnan(h.iloc[3])
+
+
+def test_turnaround_pairs_arrival_with_next_departure_of_same_aircraft():
+    llegadas = pd.DataFrame({'RM': ['ECAAA', 'ECAAA', 'ECBBB', 'ECCCC'],
+                             'minutes_eta': [400.0, 600.0, 450.0, 500.0]})
+    salidas = pd.DataFrame({'RM': ['ECAAA', 'ECAAA', 'ECBBB'],
+                            'ETD': ['07:20', '11:00', '06:00']})
+    tat = prep.turnaround_programado(llegadas, salidas)
+    assert tat.iloc[0] == 40       # 06:40 arrival, 07:20 departure
+    assert tat.iloc[1] == 60       # 10:00 arrival, 11:00 departure
+    assert np.isnan(tat.iloc[2])   # ECBBB departed before it arrived: night stop
+    assert np.isnan(tat.iloc[3])   # no departure at all
+
+
+def test_turnaround_skips_pairs_with_a_missing_leg():
+    # The aircraft arrives twice before the departure: the first arrival is
+    # not a turnaround of that departure.
+    llegadas = pd.DataFrame({'RM': ['ECAAA', 'ECAAA'], 'minutes_eta': [400.0, 500.0]})
+    salidas = pd.DataFrame({'RM': ['ECAAA'], 'ETD': ['09:00']})
+    tat = prep.turnaround_programado(llegadas, salidas)
+    assert np.isnan(tat.iloc[0]) and tat.iloc[1] == 40
+
+
+def test_cost_objective_holds_first_the_flights_with_loose_turnarounds():
+    # Two identical A320s compete for slots at 0 and 60 min of delay. The one
+    # with a 90-min buffer absorbs the hour; the tight one keeps the early slot.
+    df = pd.DataFrame({
+        'ARCID': ['TIGHT', 'LOOSE'], 'ATYP': 'A320', 'recat': 'D', 'size_seats_avg': 180,
+        'minutes_eta': [400.0, 400.0], 'minutes_etd': 300.0, 'flight_status': FS_CONTROLLED,
+        'airline': 'TST', 'tat_programado_min': [35.0, 125.0],
+    })
+    res = ghp.resolver_ghp(df, np.array([400.0, 460.0]), 'cost').set_index('ARCID')
+    assert res.loc['TIGHT', 'total_delay'] == 0
+    assert res.loc['LOOSE', 'total_delay'] == 60
 
 
 def test_passenger_scaling_uses_cook_base_load():

@@ -1,6 +1,7 @@
 # =============================================================================
 # src/lib_excel_export.py
-# FASE 3: Construcción y formato del Excel maestro de auditoría (Versión Reporte Final)
+# WP5 - Audit workbook (Excel): KPI dashboard, summary tables and the
+# flight-by-flight allocation of every scenario.
 # =============================================================================
 
 import os
@@ -11,17 +12,17 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-# Colores Corporativos para el Reporte
-COLOR_CABECERA_AZUL = "FF1F4E79"  # Azul Oscuro (Profesional)
-COLOR_CABECERA_GHP  = "FF375623"  # Verde Oscuro (Para escenarios GHP/Optimizados)
-COLOR_CABECERA_INT  = "FF7030A0"  # Púrpura (Para Intermodalidad)
+# Header colours
+COLOR_CABECERA_AZUL = "FF1F4E79"  # dark blue: GDP
+COLOR_CABECERA_GHP  = "FF375623"  # dark green: GHP scenarios
+COLOR_CABECERA_INT  = "FF7030A0"  # purple: intermodal scenarios
 COLOR_SECCION       = "FF2E75B6"
 COLOR_FILA_ALTERNA  = "FFD9E1F2"
 COLOR_FILA_BLANCA   = "FFFFFFFF"
 FUENTE_BASE         = "Arial"
 
 # =============================================================================
-# UTILIDADES DE ESTILO
+# STYLE HELPERS
 # =============================================================================
 
 def _borde_fino():
@@ -55,12 +56,12 @@ def _autoajustar_columnas(ws, ancho_minimo=12, ancho_maximo=50):
         ws.column_dimensions[col_letra].width = min(ancho_maximo, max(ancho_minimo, max_len * 1.1 + 2))
 
 # =============================================================================
-# MOTOR DE ESCRITURA CON AUTO-FORMATEO DE KPIs
+# SHEET WRITER (number format from the column name)
 # =============================================================================
 
 def _escribir_dataframe_con_formato(ws, df, color_header=COLOR_CABECERA_AZUL):
-    """Escribe un DF aplicando estilos y auto-detectando formatos de número según la columna."""
-    # Cabeceras
+    """Write df to ws with styled headers and a number format inferred from each column name."""
+    # Headers
     columnas = list(df.columns)
     for col_idx, nombre_col in enumerate(columnas, start=1):
         celda = ws.cell(row=1, column=col_idx, value=nombre_col)
@@ -70,7 +71,7 @@ def _escribir_dataframe_con_formato(ws, df, color_header=COLOR_CABECERA_AZUL):
     
     ws.row_dimensions[1].height = 30
 
-    # Analizar formatos de columnas basados en el nombre
+    # Number format per column
     formatos_columna = {}
     for col_idx, nombre_col in enumerate(columnas, start=1):
         if 'EUR' in nombre_col:
@@ -82,7 +83,7 @@ def _escribir_dataframe_con_formato(ws, df, color_header=COLOR_CABECERA_AZUL):
         else:
             formatos_columna[col_idx] = 'General'
 
-    # Datos
+    # Data
     for fila_idx, row in enumerate(df.values, start=2):
         fila_par = (fila_idx % 2 == 0)
         es_seccion = str(row[0]).startswith('--')
@@ -98,14 +99,14 @@ def _escribir_dataframe_con_formato(ws, df, color_header=COLOR_CABECERA_AZUL):
                 celda.border = estilos['border']
                 celda.alignment = estilos['alignment']
                 
-                # Aplicar formato de número si es numérico
+                # number format for numeric cells
                 if isinstance(valor, (int, float)):
                     celda.number_format = formatos_columna[col_idx]
                     
         ws.row_dimensions[fila_idx].height = 18
 
 # =============================================================================
-# ORQUESTADOR PRINCIPAL
+# WORKBOOK
 # =============================================================================
 
 def exportar_auditoria_excel(
@@ -191,7 +192,7 @@ def exportar_auditoria_excel(
     _sheet_matriz_slots(wb, df_slots)
 
     wb.save(path)
-    print(f"✅ Excel workbook written: {os.path.basename(path)}")
+    print(f"   Excel workbook written: {os.path.basename(path)}")
 
 # =============================================================================
 # FUNCIONES DE APOYO

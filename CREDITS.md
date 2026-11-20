@@ -26,8 +26,16 @@ was published; authorship and dates are unchanged.
   [doi:10.3390/app15179688](https://doi.org/10.3390/app15179688).
   Because this file is GPL-3.0, the whole project is distributed under GPL-3.0.
 - **Delay-cost tables** — A. Cook & G. Tanner, *European airline delay cost
-  reference values*, v4.1, University of Westminster for EUROCONTROL, 2015.
-- **Traffic data** — the LEBL arrivals of 10 August 2025 used for every result
+  reference values*, v4.1, University of Westminster for EUROCONTROL, 2015
+  (Tables 22, 24, 26, 28), and *The cost of passenger delay to airlines in
+  Europe*, 2015 (Annex 3, base passenger loads).
+- **Reactionary delay and turnarounds** — EUROCONTROL, *Data Snapshot #20*
+  (reactionary delays), cited in the WP3 statement; minimum declared ground
+  time of 35 min from the E190 operations-manual summary provided with the
+  course material (not redistributed).
+- **Connecting passengers at LEBL** — Cambra de Comerç de Barcelona,
+  *Observatori del Transport Aeri* (2025–2026 editions).
+- **Traffic data** — the LEBL arrivals and departures of 10 August 2025 used for every result
   in the project were provided by Prof. Adeline Montlaur (EETAC – UPC) for the
   MGTA course. They are **not redistributed** in this repository. The
   simulator runs on a synthetic day instead (`data/sample/`, generated from

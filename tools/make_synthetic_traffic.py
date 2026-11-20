@@ -1,11 +1,12 @@
-"""Generate a synthetic day of LEBL arrivals with the same layout as the real file.
+"""Generate a synthetic day of LEBL traffic with the same layout as the real file.
 
 The real traffic sample used in the course project is not redistributed (see
 CREDITS.md). This script builds a stand-in so that anyone can run the
 simulator and the tests. It is generated from scratch with a fixed seed: the
 origins are drawn from data/raw/airports.csv, the aircraft types from the fleet
-table, and arrival times from a generic summer-day profile. No flight is copied
-from the real data.
+table, and arrival times from a generic summer-day profile; most aircraft then
+depart again from LEBL after a random turnaround. No flight is copied from the
+real data.
 
 Usage (from the repository root):
     python tools/make_synthetic_traffic.py            # writes data/sample/synthetic_LEBL_day.csv
@@ -43,6 +44,11 @@ def _great_circle_km(lat1, lon1, lat2, lon2):
     a = (np.sin((p2 - p1) / 2) ** 2
          + np.cos(p1) * np.cos(p2) * np.sin(np.radians(lon2 - lon1) / 2) ** 2)
     return 2 * 6371.0 * np.arcsin(np.sqrt(a))
+
+
+def _minutes(hhmmss: str) -> int:
+    h, m, _ = (int(x) for x in hhmmss.split(':'))
+    return h * 60 + m
 
 
 def _hhmmss(minutes: float) -> str:
@@ -89,9 +95,33 @@ def main() -> None:
             'ETA': _hhmmss(t),
         })
 
+    # Next departure of the same aircraft (same RM), so that turnarounds and
+    # reactionary delay can be computed. A separate generator keeps the
+    # arrivals identical to earlier versions of the file. About 9 in 10
+    # aircraft rotate the same day; scheduled ground time is 40-200 min
+    # (median about 80 min) for narrow-bodies and 100-240 min for wide-bodies.
+    rng_dep = np.random.default_rng(SEED + 1)
+    departures = []
+    for r in rows:
+        if rng_dep.random() > 0.9:
+            continue
+        wide = r['ATYP'] in LONG_HAUL
+        tat = rng_dep.uniform(100, 240) if wide else 40 + rng_dep.gamma(2.0, 20.0)
+        etd = _minutes(r['ETA']) + round(min(tat, 200 if not wide else 240))
+        if etd >= 24 * 60:
+            continue
+        block = _minutes(r['ETA']) - _minutes(r['ETD'])
+        block = block + 1440 if block <= 0 else block
+        departures.append({
+            'ARCID': r['ARCID'][:3] + str(int(rng_dep.integers(100, 9999))) if r['ARCID'][:3].isalpha() else r['ARCID'],
+            'ATYP': r['ATYP'], 'ADEP': 'LEBL', 'ADES': r['ADEP'], 'RM': r['RM'], 'ARF': r['ARF'],
+            'ETD': _hhmmss(etd), 'TT': int(rng_dep.integers(8, 20)), 'ETA': _hhmmss(etd + block),
+        })
+
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_csv(OUTPUT, sep=';', index=False)
-    print(f"Wrote {len(rows)} synthetic arrivals to {OUTPUT.relative_to(ROOT)}")
+    pd.DataFrame(rows + departures).to_csv(OUTPUT, sep=';', index=False)
+    print(f"Wrote {len(rows)} synthetic arrivals and {len(departures)} departures "
+          f"to {OUTPUT.relative_to(ROOT)}")
 
 
 if __name__ == '__main__':

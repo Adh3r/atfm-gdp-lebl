@@ -6,7 +6,12 @@
 # - Cook & Tanner (2015), European airline delay cost reference values v4.1:
 #     tactical cost of delay per flight (Tables 22/24 primary, 26/28 full,
 #     at-gate and en-route), EUR 2014, 15 reference aircraft types, 9 delay
-#     breakpoints. 'Full' costs include reactionary (network) delay.
+#     breakpoints. 'Full' costs add the reactionary (knock-on) costs.
+# - Reactionary delay: the delay a late arrival passes on to the next rotation
+#   of the same aircraft (IATA delay code 93) and from there to the network.
+#   It only appears when the arrival delay exceeds the turnaround buffer
+#   (scheduled ground time - minimum turnaround time), so it is computed per
+#   flight from the registration mark (RM), as the WP3 statement asks.
 # - ICAO type -> closest Cook & Tanner type mapping. Costs are then scaled by
 #   real passengers (seats x European load factor) / Cook base passengers, so
 #   the mapping captures the operating category (narrow-body, wide-body,
@@ -15,20 +20,21 @@
 #   Spanish grid emission factor, for CO2 emitted while holding on the ground.
 # =============================================================================
 
+import numpy as np
 import pandas as pd
 
-# Consumo eléctrico demandado por categoría RECAT en kW
+# Electrical demand on FEGP per RECAT category (kW)
 FEGP_KW_PER_RECAT = {
     'A': 288.0,  # A388: 4 x 90 kVA (360 kVA * 0.8 = 288 kW)
     'B': 144.0,  # B789: 2 x 90 kVA (180 kVA * 0.8 = 144 kW)
     'C': 144.0,  # B764: 2 x 90 kVA (180 kVA * 0.8 = 144 kW)
     'D': 72.0,   # A320: 1 x 90 kVA (90 kVA * 0.8 = 72 kW)
-    'E': 32.0,   # E190: Límite del bus interno (40 kVA * 0.8 = 32 kW)
+    'E': 32.0,   # E190: internal bus limit (40 kVA * 0.8 = 32 kW)
     'F': 12.8,   # PC24: 28.5 VDC * 450 Amperios continuos = 12.8 kW
 }
 
-# Factor de emisión de la red eléctrica en España (kg CO2 / kWh)
-# Fuente: Red Eléctrica de España (REE) / MITERD 2023
+# Emission factor of the Spanish electricity grid (kg CO2 / kWh)
+# Source: Red Eléctrica de España (REE) / MITERD, 2023
 GRID_EMISSION_FACTOR_KG_KWH = 0.283
 
 
@@ -41,8 +47,23 @@ def co2_tierra_kg_por_min(recat) -> float:
     potencia_kw = FEGP_KW_PER_RECAT.get(clave, FEGP_KW_PER_RECAT['D'])
     return potencia_kw / 60.0 * GRID_EMISSION_FACTOR_KG_KWH
 
-# Umbral OTP: delay < 15 min = "on-time" (IATA/CODA estándar).
+# On-time performance threshold: a flight is on time when its delay is below
+# 15 min (EUROCONTROL CODA / IATA convention).
 OTP_THRESHOLD_MIN = 15
+
+# Minimum turnaround time (minimum ground time between the arrival and the next
+# departure of the same aircraft). A rotation scheduled with less ground time
+# than this has no buffer: any arrival delay propagates.
+#   narrow-body / regional: 35 min, the minimum declared ground time of the
+#       E190 operations-manual summary provided in the course ("MIN declared
+#       GND time 35 min; delay code 93 if less time available").
+#   wide-body (RECAT A-C): 80 min, the value of the delivered project.
+MIN_TURNAROUND_MIN = {'narrow': 35, 'wide': 80}
+
+# Cost bases (see coste_vuelo_vec). 'rotation' is the model used for every
+# result; 'primary' and 'full' bound it from below and above (sensitivity).
+COST_BASES = ('primary', 'rotation', 'full')
+DEFAULT_COST_BASE = 'rotation'
 
 # Base-scenario passengers per reference type: Cook & Tanner, 'The cost of
 # passenger delay to airlines in Europe', Univ. of Westminster, 2015, Annex 3
@@ -55,62 +76,56 @@ _PAX_BASE_TABLE = {
     'AT72':  52, 'AT43':  36,
 }
 
-# Load factor europeo. Fuente: IATA Annual Review 2025, promedio europeo: 83,7%
+# European passenger load factor: 83.7 % (IATA Annual Review 2025).
 LOAD_FACTOR_EU = 0.837
 
 # =============================================================================
-# MAPEO ICAO → TIPO COOK & TANNER (v4.1, 2014)
+# ICAO TYPE -> COOK & TANNER REFERENCE TYPE (v4.1, 2014)
 #
-# Principio: identificar el tipo Cook cuya estructura de costes (fuel, crew,
-# maintenance, pax) sea lo mas similar posible a la aeronave real. El ajuste
-# por densidad de pasajeros (factor_pasajeros) corrige despues
-# la diferencia de capacidad, por lo que el mapeo debe capturar la CATEGORIA
-# de operacion (turbofan narrowbody, widebody, turboprop, bizjet), no solo el
-# numero de asientos.
+# Principle: pick the Cook type whose cost structure (fuel, crew, maintenance,
+# passengers) is closest to the real aircraft. factor_pasajeros() then corrects
+# the difference in capacity, so the mapping has to capture the operating
+# category (narrow-body, wide-body, turboprop, business jet), not just the
+# seat count.
 #
-# Aeronaves del CSV de LEBL con sus mappings:
-#   A320/A20N (173 seats) → A320 (Cook base: 153 seats, pax 130)
-#   A321/A21N (207/220)   → A321 (Cook base: 187 seats, pax 158)
-#   A319      (144)       → A319 (Cook base: 133 seats, pax 113)
-#   B738/B38M (184/189)   → B738 (Cook base: 161 seats, pax 137)
-#   B739      (183)       → B738 (mas cercano operacionalmente)
-#   BCS3      (145)       → A319 (mismo rango de asientos; la A220-300 tiene
-#                           estructura de costes de narrowbody similar a A319)
-#   B733      (142, RECAT E en CSV → probable error de datos; tratamos como
-#                           narrowbody pequeno → B733 de Cook)
-#   B789/B788 (284/266)   → A332 (widebody de capacidad similar)
-#   A332/A333/A338/A339   → A332 (Cook base: 279 seats, pax 232)
-#   A359      (297)       → A332 (mas cercano disponible en Cook)
-#   B764      (245)       → B763 (Cook base: 279 seats, ajuste pax cubre dif.)
-#   B772/B77L/B77W (296-331) → B744 (widebody pesado, estructura similar)
-#   A388      (492)       → B744 (unico jumbo disponible en Cook)
-#   CRJ9/CRJX (90-100)   → E190 (regional jet, mas cercano en Cook)
-#   CRJ1/CRJ2 (~50)      → AT43
-#   E190      (104)       → E190 (match directo)
-#   AT43      (49)        → AT43 (match directo)
-#   Bizjets (GLEX,GLF6,GA5C,C525,C560,C650,C68A,E35L,E50P,
-#            E55P,F2TH,PC24,PC12,CL35) → AT43 como proxy de coste de bizjet
-#            (estructura de coste minima en Cook; el factor_pax = seats_reales/36
-#            escala el coste a la baja automaticamente para aviones con 5-15 pax)
+# LEBL types and their mapping:
+#   A320/A20N (173 seats) -> A320 (Cook base: 153 seats, 130 pax)
+#   A321/A21N (207/220)   -> A321 (Cook base: 187 seats, 158 pax)
+#   A319      (144)       -> A319 (Cook base: 133 seats, 113 pax)
+#   B738/B38M (184/189)   -> B738 (Cook base: 161 seats, 137 pax)
+#   B739      (183)       -> B738 (closest operationally)
+#   BCS3      (145)       -> A319 (same seat range, similar narrow-body costs)
+#   B733      (142)       -> B733
+#   B789/B788 (284/266)   -> A332 (wide-body of similar capacity)
+#   A332/A333/A338/A339   -> A332 (Cook base: 279 seats, 232 pax)
+#   A359      (297)       -> A332 (closest type in Cook)
+#   B764      (245)       -> B763 (passenger scaling covers the difference)
+#   B772/B77L/B77W        -> B744 (heavy wide-body)
+#   A388      (492)       -> B744 (the only jumbo in Cook)
+#   CRJ9/CRJX (90-100)    -> E190 (closest regional jet)
+#   CRJ1/CRJ2 (~50)       -> AT43
+#   E190, AT43            -> direct match
+#   Business jets         -> AT43, the cheapest Cook type; the passenger factor
+#                            (real pax / 36) scales the cost down for 5-15 pax.
 # =============================================================================
 _FLEET_TO_COOK = {
-    # --- Familia Airbus A320 ---
+    # --- Airbus A320 family ---
     'A318': 'A319', 'A319': 'A319',
-    'A320': 'A320', 'A20N': 'A320',   # A320neo -> misma tabla Cook, seats reales del CSV
-    'A321': 'A321', 'A21N': 'A321',   # A321neo -> misma tabla Cook
+    'A320': 'A320', 'A20N': 'A320',   # A320neo -> same Cook table, real seats
+    'A321': 'A321', 'A21N': 'A321',   # A321neo -> same Cook table
     # --- A220 (Bombardier CRJ -> Airbus) ---
     'BCS1': 'A319',                    # A220-100 (~115 seats) -> A319 (133 seats Cook)
-    'BCS3': 'A319',                    # A220-300 (~145 seats) -> A319 (mas cercano)
-    # --- Boeing 737 classics y NG ---
+    'BCS3': 'A319',                    # A220-300 (~145 seats) -> A319 (closest)
+    # --- Boeing 737 Classic and NG ---
     'B733': 'B733', 'B734': 'B734', 'B735': 'B735', 'B736': 'B735',
     'B737': 'B734',
-    'B738': 'B738', 'B38M': 'B738',   # B737 MAX 8 -> B738 como proxy
-    'B739': 'B738',                    # B737-900 -> B738 (misma familia)
+    'B738': 'B738', 'B38M': 'B738',   # B737 MAX 8 -> B738 as proxy
+    'B739': 'B738',                    # B737-900 -> B738 (same family)
     'B752': 'B752', 'B753': 'B752',
-    # --- Embraer comercial ---
+    # --- Embraer E-Jets ---
     'E170': 'E190', 'E175': 'E190', 'E190': 'E190', 'E195': 'E190',
     'E75L': 'E190', 'E75S': 'E190',
-    # --- CRJ comercial ---
+    # --- Bombardier CRJ ---
     'CRJ1': 'AT43', 'CRJ2': 'AT43',   # CRJ-100/200 (~50 seats) -> AT43
     'CRJ7': 'AT72',                    # CRJ-700 (~70 seats) -> AT72
     'CRJ9': 'E190', 'CRJX': 'E190',   # CRJ-900/1000 (~90-100 seats) -> E190
@@ -119,7 +134,7 @@ _FLEET_TO_COOK = {
     'AT72': 'AT72', 'ATP':  'AT72',
     'DH8A': 'AT43', 'DH8B': 'AT43', 'DH8C': 'AT43', 'DH8D': 'DH8D',
     'F50':  'AT43', 'F70':  'AT72', 'SB20': 'AT43',
-    # --- Otros narrowbody comerciales ---
+    # --- Other narrow-bodies ---
     'F100': 'E190', 'RJ1H': 'E190', 'RJ85': 'E190',
     'B712': 'B733', 'B462': 'B733', 'B463': 'B733',
     'MD80': 'B738', 'MD82': 'B738', 'MD83': 'B738',
@@ -127,25 +142,24 @@ _FLEET_TO_COOK = {
     'E120': 'AT43', 'E135': 'AT43', 'E145': 'AT43',
     'B190': 'AT43', 'CARJ': 'AT43', 'SF34': 'AT43',
     'A140': 'AT43', 'A148': 'AT43',
-    # --- Widebody medio (A330 / B787) ---
+    # --- Mid-size wide-bodies (A330 / B787) ---
     'A306': 'B763', 'A310': 'B763',
     'A332': 'A332', 'A333': 'A332', 'A338': 'A332', 'A339': 'A332',
     'A340': 'A332', 'A343': 'A332',
-    'A359': 'A332', 'A35K': 'A332',   # A350-900/1000 -> A332 (mas cercano Cook)
+    'A359': 'A332', 'A35K': 'A332',   # A350-900/1000 -> A332 (closest Cook type)
     'B788': 'A332', 'B789': 'A332',   # B787-8/9 (~260-280 seats) -> A332
     'B78X': 'B744',                    # B787-10 (~330 seats) -> B744
-    # --- Widebody pesado / jumbo ---
+    # --- Heavy wide-bodies ---
     'A345': 'B744', 'A346': 'B744',
-    'A388': 'B744',                    # A380 (492 seats) -> B744 (unico jumbo Cook)
+    'A388': 'B744',                    # A380 (492 seats) -> B744 (only jumbo in Cook)
     'B744': 'B744', 'B748': 'B744',
     'B762': 'B763', 'B763': 'B763', 'B764': 'B763',
     'B772': 'B744',                    # B777-200 (~300 seats) -> B744
     'B773': 'B744', 'B77W': 'B744', 'B77L': 'B744',
     'IL96': 'B763', 'T204': 'B763',
-    # --- Business jets / VIP (RECAT E/F en LEBL) ---
-    # Proxy: AT43 como tipo Cook de menor coste disponible.
-    # El factor_pax = (seats_reales x LF) / 36 escala el coste a la baja
-    # automaticamente (p.ej. PC24 con 8 seats → factor ~0.19).
+    # --- Business jets (RECAT E/F at LEBL) ---
+    # Proxy: AT43, the cheapest Cook type. The passenger factor
+    # (seats x LF) / 36 scales the cost down (e.g. PC24, 8 seats -> ~0.19).
     'GLEX': 'AT43', 'GLF6': 'AT43', 'GLF5': 'AT43', 'GLF4': 'AT43',
     'GA5C': 'AT43', 'GA6C': 'AT43',
     'C525': 'AT43', 'C56X': 'AT43', 'C560': 'AT43', 'C650': 'AT43',
@@ -166,8 +180,10 @@ _FLEET_TO_COOK = {
 # University of Westminster for EUROCONTROL PRU, 2015:
 #   Table 22  AT-GATE  / primary tactical costs     Table 26  AT-GATE  / full tactical costs
 #   Table 24  EN-ROUTE / primary tactical costs     Table 28  EN-ROUTE / full tactical costs
-# 'primary' = costs of the delayed flight itself; 'full' = primary plus the
-# reactionary (network) costs the delay propagates to later rotations.
+# 'primary' = costs of the delayed flight itself (passengers, crew, fuel,
+# maintenance); 'full' = primary plus the reactionary costs the delay passes
+# on to later rotations, all costed at the gate. Hence full - primary is the
+# same at-gate and en-route (checked in the tests).
 # Columns are the delay breakpoints in _DELAY_BREAKPOINTS.
 _COOK_TACTICAL = {
     ('at_gate', 'primary'): {
@@ -242,18 +258,18 @@ _COOK_TACTICAL = {
 
 _DELAY_BREAKPOINTS = [5, 15, 30, 60, 90, 120, 180, 240, 300]
 
+
 def _mapear_tipo_cook(tipo_icao: str, recat: str, seats: int = 0) -> str:
     """
-    Mapea tipo ICAO al tipo Cook & Tanner v4.1 mas cercano.
+    Closest Cook & Tanner v4.1 reference type for an ICAO aircraft type.
 
-    Orden de prioridad:
-      1. Lookup directo en _FLEET_TO_COOK (identificacion exacta por tipo ICAO).
-      2. Fallback por RECAT + seats cuando el tipo no esta en la tabla:
-         - RECAT A/B/C (widebody): B744 si seats > 350, A332 si seats > 240, B763
-         - RECAT D     (narrowbody): A321 si seats > 195, A320 si seats > 160,
-                                     A319 si seats > 130, B733
-         - RECAT E     (regional):   E190 si seats > 80, AT72 si seats > 55, AT43
-         - RECAT F     (ligero):     AT43 (con factor_pax muy bajo)
+      1. Direct lookup in _FLEET_TO_COOK.
+      2. Otherwise by RECAT category and seats:
+         - RECAT A/B/C (wide-body):   B744 if seats > 350, A332 if > 240, else B763
+         - RECAT D     (narrow-body): A321 if seats > 195, A320 if > 160,
+                                      A319 if > 130, else B733
+         - RECAT E     (regional):    E190 if seats > 80, AT72 if > 55, else AT43
+         - RECAT F     (light):       AT43 (with a very low passenger factor)
     """
     tipo_upper = str(tipo_icao).upper().strip()
     if tipo_upper in _FLEET_TO_COOK:
@@ -280,36 +296,105 @@ def _mapear_tipo_cook(tipo_icao: str, recat: str, seats: int = 0) -> str:
         if seats > 55:
             return 'AT72'
         return 'AT43'
-    # RECAT F o desconocido
+    # RECAT F or unknown
     return 'AT43'
 
 
-def _coste_tabla(tipo_cook: str, delay_min: float, fase: str) -> float:
-    """
-    Cook & Tanner tactical cost (EUR, per flight, base scenario) of a delay.
+# =============================================================================
+# COST CURVES
+# =============================================================================
 
-    - delay < OTP threshold (15 min): 'primary' table. On-time flights cause no
-      reactionary delay, so only the flight's own costs apply.
-    - delay >= 15 min: 'full' table, which adds the reactionary costs.
-    - Linear interpolation between breakpoints, from 0 EUR at 0 min.
-    - Beyond 300 min the last segment is extended linearly, so the cost keeps
-      growing and the optimiser never sees extra delay as free.
+def _curva(tipo_cook: str, fase: str, alcance: str, delays) -> 'np.ndarray':
+    """Cook & Tanner cost (EUR per flight, Cook base load) for an array of delays.
+
+    Linear interpolation between the breakpoints, from 0 EUR at 0 min. Beyond
+    300 min the last segment is extended, so extra delay is never free.
     """
-    if delay_min <= 0:
-        return 0.0
-    alcance = 'primary' if delay_min < OTP_THRESHOLD_MIN else 'full'
+    d = np.clip(np.asarray(delays, dtype=float), 0, None)
     tabla = _COOK_TACTICAL[(fase, alcance)]
-    costes = tabla.get(tipo_cook, tabla['A320'])
-    x = [0] + _DELAY_BREAKPOINTS
-    y = [0] + costes
-    if delay_min >= x[-1]:
-        pendiente = (y[-1] - y[-2]) / (x[-1] - x[-2])
-        return y[-1] + pendiente * (delay_min - x[-1])
-    for i in range(len(x) - 1):
-        if delay_min <= x[i + 1]:
-            t = (delay_min - x[i]) / (x[i + 1] - x[i])
-            return y[i] + t * (y[i + 1] - y[i])
-    return float(y[-1])
+    x = np.array([0] + _DELAY_BREAKPOINTS, dtype=float)
+    y = np.array([0] + tabla.get(tipo_cook, tabla['A320']), dtype=float)
+    out = np.interp(d, x, y)
+    mas_alla = d > x[-1]
+    out[mas_alla] = y[-1] + (y[-1] - y[-2]) / (x[-1] - x[-2]) * (d[mas_alla] - x[-1])
+    return out
+
+
+def coste_primario_vec(tipo_cook: str, delays, fase: str = 'at_gate') -> 'np.ndarray':
+    """Primary tactical cost (Tables 22/24): the delayed flight's own costs."""
+    return _curva(tipo_cook, fase, 'primary', delays)
+
+
+def coste_reactivo_vec(tipo_cook: str, delays) -> 'np.ndarray':
+    """Reactionary cost of a delay passed on to the next rotation.
+
+    Cook & Tanner full minus primary at-gate cost (Table 26 - Table 22). At
+    5 min the full value is slightly below the primary one (rounding and the
+    different passenger treatment of the two tables), so the difference is
+    floored at 0 and made non-decreasing.
+    """
+    d = np.clip(np.asarray(delays, dtype=float), 0, None)
+    x = np.array([0] + _DELAY_BREAKPOINTS, dtype=float)
+    full = _COOK_TACTICAL[('at_gate', 'full')]
+    prim = _COOK_TACTICAL[('at_gate', 'primary')]
+    y = np.array([0] + full.get(tipo_cook, full['A320']), dtype=float) \
+        - np.array([0] + prim.get(tipo_cook, prim['A320']), dtype=float)
+    y = np.maximum.accumulate(np.clip(y, 0, None))
+    out = np.interp(d, x, y)
+    mas_alla = d > x[-1]
+    out[mas_alla] = y[-1] + (y[-1] - y[-2]) / (x[-1] - x[-2]) * (d[mas_alla] - x[-1])
+    return out
+
+
+def retraso_propagado(delay, holgura) -> 'np.ndarray':
+    """Delay passed on to the next departure of the same aircraft.
+
+    holgura: turnaround buffer (scheduled ground time - minimum turnaround
+    time, >= 0). NaN means no later departure of this aircraft from LEBL that
+    day (night stop): nothing propagates.
+    """
+    d = np.asarray(delay, dtype=float)
+    h = np.asarray(holgura, dtype=float)
+    return np.where(np.isnan(h), 0.0, np.clip(d - np.nan_to_num(h), 0, None))
+
+
+# =============================================================================
+# COST OF DELAY OF A FLIGHT
+# =============================================================================
+
+def coste_vuelo_vec(
+    tipo_cook: str,
+    factor_pax: float,
+    ground_delay,
+    air_delay=0.0,
+    holgura=np.nan,
+    base: str = DEFAULT_COST_BASE,
+) -> 'np.ndarray':
+    """
+    Cost of delay (EUR 2014) of one flight for an array of delays.
+
+        primary   = P_gate(ground) + P_enroute(air)
+        'primary' : primary only (lower bound: no knock-on effect).
+        'rotation': primary + R(p), where p = max(0, delay - turnaround buffer)
+                    is the delay passed on to the aircraft's next departure and
+                    R = Cook full - primary is the reactionary cost of a delay
+                    that enters the network. A flight whose buffer absorbs the
+                    delay, or with no further rotation that day, costs primary.
+        'full'    : primary + R(delay), Cook & Tanner's network average, which
+                    assumes an average buffer (upper bound here).
+
+    All terms are scaled by factor_pax (real passengers / Cook base load).
+    """
+    if base not in COST_BASES:
+        raise ValueError(f"base must be one of {COST_BASES}")
+    g = np.clip(np.asarray(ground_delay, dtype=float), 0, None)
+    a = np.clip(np.broadcast_to(np.asarray(air_delay, dtype=float), g.shape), 0, None)
+    coste = coste_primario_vec(tipo_cook, g, 'at_gate') + coste_primario_vec(tipo_cook, a, 'en_route')
+    if base == 'full':
+        coste = coste + coste_reactivo_vec(tipo_cook, g + a)
+    elif base == 'rotation':
+        coste = coste + coste_reactivo_vec(tipo_cook, retraso_propagado(g + a, holgura))
+    return coste * factor_pax
 
 
 def factor_pasajeros(tipo_cook: str, asientos) -> float:
@@ -324,31 +409,59 @@ def factor_pasajeros(tipo_cook: str, asientos) -> float:
     return pax_reales / _PAX_BASE_TABLE.get(tipo_cook, 130)
 
 
-def coste_retraso_eur(atyp, recat, asientos, delay_min: float, fase: str = 'at_gate') -> float:
+def _tipo_y_factor(fila) -> tuple[str, float]:
+    asientos = fila.get('size_seats_avg', 180)
+    asientos = 180 if pd.isna(asientos) else asientos
+    tipo = _mapear_tipo_cook(fila.get('ATYP', ''), fila.get('recat', 'D'), int(asientos))
+    return tipo, factor_pasajeros(tipo, asientos)
+
+
+def holgura_rotacion(df: pd.DataFrame, mtt_extra: float = 0.0) -> pd.Series:
+    """Turnaround buffer of each arrival: scheduled ground time - MTT (>= 0).
+
+    NaN when the aircraft has no later departure from LEBL that day.
+    mtt_extra shifts the minimum turnaround times (sensitivity analysis).
     """
-    Cost of delay of one flight (EUR 2014): Cook & Tanner tactical cost for its
-    reference aircraft type, scaled by its real passenger load.
+    if 'tat_programado_min' not in df.columns:
+        return pd.Series(np.nan, index=df.index)
+    ancho = df.get('recat', pd.Series('D', index=df.index)).isin(['A', 'B', 'C'])
+    mtt = np.where(ancho, MIN_TURNAROUND_MIN['wide'], MIN_TURNAROUND_MIN['narrow']) + mtt_extra
+    return (df['tat_programado_min'] - mtt).clip(lower=0)
 
-    fase: 'at_gate' for ground delay (controlled flights held at the origin
-          gate), 'en_route' for airborne delay (exempt flights holding).
+
+def costes_por_vuelo(
+    df: pd.DataFrame,
+    ground_col: str = 'ground_delay',
+    air_col: str = 'air_delay',
+    base: str = DEFAULT_COST_BASE,
+    mtt_extra: float = 0.0,
+) -> pd.DataFrame:
+    """Cost of delay of every flight of a scenario.
+
+    Returns a DataFrame (same index) with:
+        coste_primario_eur, coste_reactivo_eur, coste_retraso_eur (their sum)
+        retraso_propagado_min (delay passed on to the next rotation)
     """
-    tipo = _mapear_tipo_cook(atyp, recat, int(asientos) if pd.notna(asientos) else 0)
-    return _coste_tabla(tipo, delay_min, fase) * factor_pasajeros(tipo, asientos)
+    n = len(df)
+    def _col(nombre):
+        if nombre in df.columns:
+            return df[nombre].fillna(0).to_numpy(dtype=float)
+        return np.zeros(n)
+    g, a = _col(ground_col), _col(air_col)
+    holgura = holgura_rotacion(df, mtt_extra).to_numpy(dtype=float)
+    tipos, fpax = map(np.array, zip(*(_tipo_y_factor(f) for _, f in df.iterrows()))) if n else ([], [])
 
-
-def coste_tabla_vec(tipo_cook: str, delays, fase: str = 'at_gate'):
-    """Vectorised _coste_tabla() for an array of delays (same rules)."""
-    import numpy as np
-    d = np.asarray(delays, dtype=float)
-    x = np.array([0] + _DELAY_BREAKPOINTS, dtype=float)
-    out = np.zeros_like(d)
-    for alcance, mask in (('primary', (d > 0) & (d < OTP_THRESHOLD_MIN)),
-                          ('full', d >= OTP_THRESHOLD_MIN)):
-        tabla = _COOK_TACTICAL[(fase, alcance)]
-        y = np.array([0] + tabla.get(tipo_cook, tabla['A320']), dtype=float)
-        pendiente = (y[-1] - y[-2]) / (x[-1] - x[-2])
-        vals = np.interp(d[mask], x, y)
-        mas_alla = d[mask] > x[-1]
-        vals[mas_alla] = y[-1] + pendiente * (d[mask][mas_alla] - x[-1])
-        out[mask] = vals
-    return out
+    prim, total = np.zeros(n), np.zeros(n)
+    for tipo in np.unique(tipos):
+        m = tipos == tipo
+        prim[m] = coste_vuelo_vec(tipo, fpax[m].astype(float), g[m], a[m], base='primary')
+        total[m] = coste_vuelo_vec(tipo, fpax[m].astype(float), g[m], a[m], holgura[m], base)
+    if base == 'rotation':
+        prop = retraso_propagado(g + a, holgura)
+    elif base == 'full':
+        prop = g + a
+    else:
+        prop = np.zeros(n)
+    return pd.DataFrame({'coste_primario_eur': prim, 'coste_reactivo_eur': total - prim,
+                         'coste_retraso_eur': total, 'retraso_propagado_min': prop},
+                        index=df.index)
