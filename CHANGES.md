@@ -13,7 +13,7 @@ Status legend: ⏳ pending · ✅ fixed
 | | Issue | Status |
 |---|---|---|
 | R1 | Unpinned dependencies: PuLP ≥ 3 changed its API and the pipeline crashed in WP3. | ✅ pinned (`requirements.txt`) |
-| R2 | 19 of 47 tests were stale and one test file was never collected. | ⏳ |
+| R2 | 19 of 47 tests were stale and one test file was never collected. | ⏳ WP1 suite rewritten (22 tests) |
 
 ## Results
 
@@ -25,3 +25,13 @@ Status legend: ⏳ pending · ✅ fixed
 | C4 | WP4 "total system CO₂" subtracts the CO₂ of the 11 rail-replaceable flights of the whole day (69.0 t) from a baseline that only covers the regulated window (9 of those flights, 57.0 t). The direct rail saving (43 t) also uses all 11 flights, while the text speaks of 9. | WP4 CO₂ figures | ⏳ |
 | C5 | Ground-delay CO₂ used a cruise-burn proxy in the WP2 heatmaps but FEGP ground power in WP3/WP4. | WP2 CO₂ heatmaps | ⏳ |
 | C6 | The report states that the GHP lowers the maximum delay; its own appendix table shows the opposite. Compression moved 222 flights (the report says 212). | Text only | ⏳ |
+| C7 | Flight distance was inferred from block time minus taxi time times a RECAT cruise speed. It underestimated short routes badly: Palma (202 km) came out as 0–115 km, and two Vueling flights got 6.8 km and an absurd 4.4 t of CO₂. Madrid flights (483 km) were often above 500 km and so missed the rail filter, although the report describes the filter as "orthodromic distance". Distances are now great-circle, from a coordinates table built from public-domain OurAirports data (`tools/build_airport_table.py`). | WP1: the GDP allocation, delays and costs are unchanged. System CO₂ +1.6 %; delay CO₂ −0.3 %. WP4: 18 rail-replaceable flights in the regulated window instead of 9 (every Madrid flight now qualifies), and the direct rail saving roughly doubles. Final WP4 figures depend on C4. | ✅ |
+
+C4 quotes the figures obtained with the original distance model.
+
+### WP1 data handling (no effect on results)
+
+- Times that cannot be parsed now raise an error instead of silently becoming 00:00.
+- The trailing blank rows of the fleet table are dropped on load, and conflicting entries for the same aircraft type are rejected.
+- Callsigns that are not ICAO airline flights (one business jet using its registration, N818CA) are labelled `GA` instead of a fake airline "N81".
+- The flight list is sorted with a stable sort, so ties in ETA keep a deterministic order.

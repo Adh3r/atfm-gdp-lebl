@@ -29,6 +29,9 @@ was published; authorship and dates are unchanged.
   reference values*, v4.1, University of Westminster for EUROCONTROL, 2015.
 - **Input data** (`data/raw/`) — LEBL arrivals on 10 August 2025 and the fleet
   category/seat table, provided by the MGTA course for this project.
+- **Airport coordinates** (`data/raw/airports.csv`) — extracted from
+  [OurAirports](https://ourairports.com/data/) (public domain) with
+  `tools/build_airport_table.py`.
 
 ## Development assistance
 

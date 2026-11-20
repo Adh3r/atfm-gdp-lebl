@@ -1,186 +1,194 @@
 # =============================================================================
-# Data Prep - Phase 1
-# Maps raw CSV data to the clean format needed for GDP processing.
+# src/lib_data_prep.py
+# WP1 - Data preparation.
+# Maps the raw traffic CSV to the clean table the GDP engine needs.
 #
 # Steps:
-#   - Load flight schedule & fleet specs
-#   - Filter arrivals (LEBL)
-#   - Join aircraft metadata (seats/type)
-#   - Time conversion (HH:MM -> minutes)
-#   - Region tagging (ECAC) & airline ID
-#   - Distance + CO2 calculations
-#
-# Decoupled logic: no processing here, just data cleaning.
+#   - Load the flight list, the fleet table and the airport coordinates
+#   - Keep arrivals to LEBL
+#   - Join aircraft metadata (RECAT category, seats)
+#   - Convert times (HH:MM[:SS] -> minutes from midnight UTC)
+#   - Tag ECAC origins and extract the airline designator
+#   - Great-circle distance from the origin airport, and baseline CO2
 # =============================================================================
 
 import os
+import re
+
 import numpy as np
 import pandas as pd
 
-# Import constants from config.py
-from config import ECAC_PREFIXES, VELOCIDAD_KNOTS
+from config import ECAC_PREFIXES
+from emissions_fuel_model import compute_co2_ask
+
+AIRPORT = 'LEBL'
+EARTH_RADIUS_KM = 6371.0
+
+# ICAO airline flights use a 3-letter operator designator followed by the
+# flight number (VLG1234, RYR404A). Anything else, such as a registration used
+# as callsign (N818CA), is general aviation.
+AIRLINE_CALLSIGN = re.compile(r'^[A-Z]{3}\d')
+GENERAL_AVIATION = 'GA'
 
 # =============================================================================
-# CONVERT TIME TO MINUTES
+# TIME CONVERSION
 # =============================================================================
 
-def parse_time_to_minutes(time_str: str) -> float:
+def parse_time_to_minutes(time_str) -> float:
     """
-    Parses a time string into decimal minutes from midnight.
+    Parse 'HH:MM:SS', 'HH:MM' or a plain number of minutes into minutes
+    from midnight.
 
-    Args:
-        time_str: Time string to convert (handles NaN from CSV).
-
-    Returns:
-        float: Total minutes. Returns 0.0 if input is invalid or missing.
+    Returns NaN when the value is missing or cannot be parsed, so bad rows are
+    caught by preparar_vuelos() instead of silently becoming 00:00.
     """
-    # Handle empty CSV cells (Pandas NaNs). 
-    # Returning 0 to avoid crashing the math down the line.
     if pd.isna(time_str):
-        return 0.0
-
+        return np.nan
     try:
-        # Parse time string into components
-        partes = list(map(int, str(time_str).split(':')))
+        parts = [int(p) for p in str(time_str).strip().split(':')]
+    except ValueError:
+        return np.nan
 
-        if len(partes) == 3:
-            # HH:MM:SS format
-            return partes[0] * 60 + partes[1] + partes[2] / 60
-        elif len(partes) == 2:
-            # HH:MM format
-            return partes[0] * 60 + partes[1]
-        elif len(partes) == 1:
-            # Plain numeric (e.g., taxi time "12" -> 12 mins)
-            return float(partes[0])
-        else:
-            return 0.0  # Unknown format
-
-    except (ValueError, AttributeError):
-        # Catch non-numeric strings (e.g. "N/A") or types without .split()
-        # Default to 0.0 to keep the data pipeline running.
-        return 0.0
+    if len(parts) == 3:
+        return parts[0] * 60 + parts[1] + parts[2] / 60
+    if len(parts) == 2:
+        return float(parts[0] * 60 + parts[1])
+    if len(parts) == 1:
+        return float(parts[0])
+    return np.nan
 
 # =============================================================================
-# PRINCIPAL FUNCTION: LOADING FLIGHTS
+# GEOMETRY
 # =============================================================================
 
-def preparar_vuelos(path_vuelos: str, path_flota: str) -> pd.DataFrame:
+def great_circle_km(lat1, lon1, lat2, lon2):
+    """Haversine great-circle distance in km (works on scalars or arrays)."""
+    p1, p2 = np.radians(lat1), np.radians(lat2)
+    dphi = p2 - p1
+    dlmb = np.radians(np.asarray(lon2) - np.asarray(lon1))
+    a = np.sin(dphi / 2) ** 2 + np.cos(p1) * np.cos(p2) * np.sin(dlmb / 2) ** 2
+    return 2 * EARTH_RADIUS_KM * np.arcsin(np.sqrt(a))
+
+
+def load_airports(path_aeropuertos: str) -> pd.DataFrame:
+    """Load the airport table (icao; name; lat_deg; lon_deg) indexed by ICAO."""
+    return pd.read_csv(path_aeropuertos, sep=';').set_index('icao')
+
+# =============================================================================
+# MAIN FUNCTION: LOAD FLIGHTS
+# =============================================================================
+
+def preparar_vuelos(
+    path_vuelos: str,
+    path_flota: str,
+    path_aeropuertos: str | None = None,
+) -> pd.DataFrame:
     """
     Args:
-        path_vuelos: Path to the daily flight schedule CSV (e.g., LEBL_10AUG2025.csv).
-        path_flota: Path to the fleet classification CSV (fleet_cat_seat.csv).
+        path_vuelos:      daily flight list CSV (e.g. LEBL_10AUG2025.csv).
+        path_flota:       fleet table CSV (fleet_cat_seat.csv).
+        path_aeropuertos: airport coordinates CSV. Defaults to airports.csv
+                          next to the flight list.
 
     Returns:
-        pd.DataFrame: Clean, enriched table sorted by ETA. 
-                      Includes distance_km, is_ecac, co2_kg_vuelo, etc.
+        Arrivals to LEBL sorted by ETA, with minutes_eta/etd/tt, is_ecac,
+        airline, distancia_km (great circle), co2_kg_vuelo and
+        duracion_vuelo_min.
+
+    Raises:
+        ValueError: if a time cannot be parsed or an origin airport has no
+                    coordinates.
     """
-    print("   -> Leyendo datos y calculando distancias cinemáticas...")
+    print("   -> Leyendo datos y calculando distancias ortodrómicas...")
+    if path_aeropuertos is None:
+        path_aeropuertos = os.path.join(os.path.dirname(path_vuelos), 'airports.csv')
 
-    # =========================================================================
-    # STEP 1: READ THE 2 CSVs
-    # =========================================================================
-    # separator=';' 
+    # -------------------------------------------------------------------------
+    # 1. Read the inputs
+    # -------------------------------------------------------------------------
     df_vuelos = pd.read_csv(path_vuelos, sep=';')
-    df_flota  = pd.read_csv(path_flota,  sep=';')
+    df_flota = pd.read_csv(path_flota, sep=';')
+    aeropuertos = load_airports(path_aeropuertos)
 
-    # =========================================================================
-    # STEP 2: ONLY ARRIVALS TO LEBL
-    # =========================================================================
-   # Filter for LEBL arrivals only. 
-    # Drop LEBL->LEBL flights (test circuits or local loops).
+    # The fleet CSV carries an unnamed index column and hundreds of blank rows.
+    df_flota.columns = df_flota.columns.str.strip()
+    df_flota = (
+        df_flota.rename(columns={'f': 'ATYP'})
+        .dropna(subset=['ATYP'])[['ATYP', 'recat', 'size_seats_avg']]
+        .drop_duplicates()
+    )
+    if df_flota['ATYP'].duplicated().any():
+        dup = sorted(df_flota.loc[df_flota['ATYP'].duplicated(), 'ATYP'])
+        raise ValueError(f"Conflicting fleet entries for aircraft types: {dup}")
+
+    # -------------------------------------------------------------------------
+    # 2. Arrivals to LEBL only (LEBL->LEBL local circuits are dropped)
+    # -------------------------------------------------------------------------
     df_vuelos = df_vuelos[
-        (df_vuelos['ADES'] == 'LEBL') & 
-        (df_vuelos['ADEP'] != 'LEBL')
+        (df_vuelos['ADES'] == AIRPORT) & (df_vuelos['ADEP'] != AIRPORT)
     ].copy()
 
-    # =========================================================================
-    # STEP 3: FLEET DATA MERGE
-    # =========================================================================
-    # Adds 'recat' (for cruise speed) and 'size_seats_avg' (for CO2 calc) 
-    # based on aircraft type (ATYP).
+    # -------------------------------------------------------------------------
+    # 3. Fleet data: RECAT category and average seats per aircraft type
+    # -------------------------------------------------------------------------
+    df_vuelos = pd.merge(df_vuelos, df_flota, on='ATYP', how='left')
 
-    # Cleanup: strip whitespace and match column names for the join
-    df_flota.columns = df_flota.columns.str.strip()
-    df_flota = df_flota.rename(columns={'f': 'ATYP'})
+    # -------------------------------------------------------------------------
+    # 4. Times in minutes from midnight UTC
+    # -------------------------------------------------------------------------
+    for col, raw in (('minutes_eta', 'ETA'), ('minutes_etd', 'ETD'), ('minutes_tt', 'TT')):
+        df_vuelos[col] = df_vuelos[raw].apply(parse_time_to_minutes)
+        bad = df_vuelos[col].isna()
+        if bad.any():
+            ids = df_vuelos.loc[bad, 'ARCID'].tolist()
+            raise ValueError(f"Unparseable {raw} for flights {ids}")
 
-    # Left join to keep all flights even if ATYP is missing in the catalog
-    df_vuelos = pd.merge(
-        df_vuelos,
-        df_flota[['ATYP', 'recat', 'size_seats_avg']],
-        on='ATYP',
-        how='left'
+    # -------------------------------------------------------------------------
+    # 5. ECAC origin and airline designator
+    # -------------------------------------------------------------------------
+    df_vuelos['is_ecac'] = df_vuelos['ADEP'].astype(str).str.startswith(ECAC_PREFIXES)
+    es_aerolinea = df_vuelos['ARCID'].str.match(AIRLINE_CALLSIGN)
+    df_vuelos['airline'] = np.where(es_aerolinea, df_vuelos['ARCID'].str[:3], GENERAL_AVIATION)
+
+    # -------------------------------------------------------------------------
+    # 6. Great-circle distance from the origin airport to LEBL
+    #    Used for the GDP coverage radius, the rail-substitution filter and
+    #    the CO2 model.
+    # -------------------------------------------------------------------------
+    sin_coordenadas = sorted(set(df_vuelos['ADEP']) - set(aeropuertos.index))
+    if sin_coordenadas or AIRPORT not in aeropuertos.index:
+        raise ValueError(
+            f"Missing coordinates for {sin_coordenadas or [AIRPORT]} in {path_aeropuertos}; "
+            "regenerate it with tools/build_airport_table.py"
+        )
+    origen = aeropuertos.loc[df_vuelos['ADEP']]
+    destino = aeropuertos.loc[AIRPORT]
+    df_vuelos['distancia_km'] = great_circle_km(
+        origen['lat_deg'].to_numpy(), origen['lon_deg'].to_numpy(),
+        destino['lat_deg'], destino['lon_deg'],
     )
 
-    # =========================================================================
-    # STEP 4: TIME CONVERSION (MINUTES FROM MIDNIGHT)
-    # =========================================================================
-    df_vuelos['minutes_eta'] = df_vuelos['ETA'].apply(parse_time_to_minutes)
-    df_vuelos['minutes_etd'] = df_vuelos['ETD'].apply(parse_time_to_minutes)
-    df_vuelos['minutes_tt']  = df_vuelos['TT'].apply(parse_time_to_minutes)
+    # Block time ETD -> ETA (an arrival after midnight adds 24 h).
+    duracion = df_vuelos['minutes_eta'] - df_vuelos['minutes_etd']
+    df_vuelos['duracion_vuelo_min'] = np.where(duracion <= 0, duracion + 1440, duracion).clip(min=1)
 
-    # =========================================================================
-    # STEP 5: ECAC TAGGING & AIRLINE extraction
-    # =========================================================================
-    # Tagging ECAC flights
-    df_vuelos['is_ecac'] = df_vuelos['ADEP'].astype(str).str.startswith(ECAC_PREFIXES)
-
-    # Standard 3-letter ICAO airline code from flight ID
-    df_vuelos['airline'] = df_vuelos['ARCID'].str[:3]
-
-    # =========================================================================
-    # STEP 6: FLIGHT DISTANCE CALCULATION
-    # =========================================================================
-    # Used for GDP coverage radius and CO2 estimations.
-    # Logic: air_time = (ETA - ETD) - taxi_time - 5.5min buffer.
-    
-    duracion_total_min = df_vuelos['minutes_eta'] - df_vuelos['minutes_etd']
-
-    # Midnight crossover fix: if arrival < departure, add 24h
-    duracion_total_min = np.where(duracion_total_min < 0, duracion_total_min + 1440, duracion_total_min)
-
-    # Actual airborne hours ( - taxi and maneuvering buffer)
-    tiempo_en_aire_horas = (duracion_total_min - df_vuelos['minutes_tt'] - 5.5) / 60.0
-
-    # Cruise speed based on RECAT; fallback to 440kt (CAT D) if unknown
-    velocidad_crucero_kt = df_vuelos['recat'].map(VELOCIDAD_KNOTS).fillna(440)
-
-    # Final distance in km (1.852 factor for NM to KM)
-    df_vuelos['distancia_km'] = (tiempo_en_aire_horas * velocidad_crucero_kt * 1.852).clip(lower=0)
-
-    # =========================================================================
-    # STEP 7: CO2 EMISSIONS (Montlaur, Trapote-Barreira & Delgado, 2025)
-    # =========================================================================
-    # Using ASK (Available Seat Kilometer) model:
-    # CO2 [kg] = (gCO2/ASK * distance * seats) / 1000
-    from emissions_fuel_model import compute_co2_ask
-
+    # -------------------------------------------------------------------------
+    # 7. Baseline CO2 per flight (Montlaur, Trapote-Barreira & Delgado, 2025)
+    #    CO2 [kg] = gCO2/ASK * distance * seats / 1000
+    # -------------------------------------------------------------------------
     def _calcular_co2_vuelo(fila) -> float:
         distancia = fila['distancia_km']
-        asientos  = fila['size_seats_avg']
-        duracion  = fila['minutes_eta'] - fila['minutes_etd']
-
-        if duracion < 0: duracion += 1440
-
-        # Data check
-        if distancia <= 0 or pd.isna(asientos) or asientos <= 0 or duracion <= 0:
+        asientos = fila['size_seats_avg']
+        if distancia <= 0 or pd.isna(asientos) or asientos <= 0:
             return 0.0
-
-        # Force=True extrapolates for edge cases (very short flights/odd aircraft)
+        # force=True extrapolates outside the model's fitted seat/distance range
         co2_por_ask = compute_co2_ask(distancia, int(asientos), force=True)
         return round(co2_por_ask * distancia * asientos / 1000, 2)
 
     df_vuelos['co2_kg_vuelo'] = df_vuelos.apply(_calcular_co2_vuelo, axis=1)
 
-    # Store clean duration for downstream economic KPIs
-    df_vuelos['duracion_vuelo_min'] = np.where(
-        duracion_total_min <= 0, duracion_total_min + 1440, duracion_total_min
-    ).clip(min=1)
-
-    # =========================================================================
-    # FINAL EXPORT: SORT BY ETA
-    # =========================================================================
-    # GDP engine expects chronological arrival order.
-    return df_vuelos.sort_values('minutes_eta').reset_index(drop=True)
+    # The GDP engine expects chronological arrival order.
+    return df_vuelos.sort_values('minutes_eta', kind='stable').reset_index(drop=True)
 
 # --- DEBUG MODE ---
 if __name__ == "__main__":
@@ -188,7 +196,7 @@ if __name__ == "__main__":
 
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     p_vuelos = os.path.join(base, 'data/raw/LEBL_10AUG2025.csv')
-    p_flota  = os.path.join(base, 'data/raw/fleet_cat_seat.csv')
+    p_flota = os.path.join(base, 'data/raw/fleet_cat_seat.csv')
     p_debug_out = os.path.join(base, 'debug/DEBUG_01_preprocesado.xlsx')
 
     df_debug = preparar_vuelos(p_vuelos, p_flota)

@@ -82,24 +82,6 @@ class AirportConfig:
 
 
 # =============================================================================
-# CRUISE SPEED - CATEGORIES (RECAT-EU)
-# =============================================================================
-# Used to estimate the distance flewn.
-# RECAT-EU classifies planes by size:
-#   A → largest (A380), F → smallest (light aircrafts).
-# we will take as default the speed of category D for the ones that are not defined into these categories
-
-VELOCIDAD_KNOTS: dict[str, int] = {
-    'A': 480,   # Super-Heavy: A380
-    'B': 470,   # Upper-Heavy: B747, A340
-    'C': 460,   # Lower-Heavy: B767, A330
-    'D': 440,   # Upper-Medium: B737, A320 — most common in LEBL since it is full of A320 from vueling
-    'E': 320,   # Lower-Medium
-    'F': 150,   # Light
-}
-
-
-# =============================================================================
 # OACI PREFIXES OF ECAC AIRPORTS
 # =============================================================================
 # ECAC: European Civil Aviation Conference
