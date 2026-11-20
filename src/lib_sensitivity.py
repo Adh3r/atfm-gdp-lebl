@@ -102,7 +102,6 @@ def _simular_gdp_ligero(
     """
     # Import local para evitar circularidad (ver explicación arriba)
     from lib_gdp_core import ejecutar_nucleo_gdp, calcular_kpis_economicos
-    from config import FS_AIRBORNE
 
     # Ejecutamos la simulación GDP completa con los parámetros de esta celda
     resultados = ejecutar_nucleo_gdp(
@@ -110,10 +109,11 @@ def _simular_gdp_ligero(
         params,
         radius_km=radius_km,
         h_file_offset=h_file,
+        run_compression=False,
     )
 
     df_resultado = resultados['vuelos_asignados']
-    kpis         = calcular_kpis_economicos(df_resultado)
+    kpis         = calcular_kpis_economicos(df_resultado, params['H_START'])
 
 
     # Devolvemos solo los KPIs que necesitamos para los heatmaps

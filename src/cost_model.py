@@ -24,9 +24,19 @@ FEGP_KW_PER_RECAT = {
     'F': 12.8,   # PC24: 28.5 VDC * 450 Amperios continuos = 12.8 kW
 }
 
-# Factor de emisión de la red eléctrica en España (kg CO2 / kWh) 
+# Factor de emisión de la red eléctrica en España (kg CO2 / kWh)
 # Fuente: Red Eléctrica de España (REE) / MITERD 2023
-GRID_EMISSION_FACTOR_KG_KWH = 0.283 
+GRID_EMISSION_FACTOR_KG_KWH = 0.283
+
+
+def co2_tierra_kg_por_min(recat) -> float:
+    """kg of CO2 per minute for an aircraft held at the gate on FEGP.
+
+    Unknown or missing RECAT categories fall back to D (A320 family).
+    """
+    clave = str(recat).upper() if isinstance(recat, str) else 'D'
+    potencia_kw = FEGP_KW_PER_RECAT.get(clave, FEGP_KW_PER_RECAT['D'])
+    return potencia_kw / 60.0 * GRID_EMISSION_FACTOR_KG_KWH
 
 # Umbral OTP: delay < 15 min = "on-time" (IATA/CODA estándar).
 OTP_THRESHOLD_MIN = 15

@@ -13,7 +13,7 @@ Status legend: ⏳ pending · ✅ fixed
 | | Issue | Status |
 |---|---|---|
 | R1 | Unpinned dependencies: PuLP ≥ 3 changed its API and the pipeline crashed in WP3. | ✅ pinned (`requirements.txt`) |
-| R2 | 19 of 47 tests were stale and one test file was never collected. | ⏳ WP1 suite rewritten (22 tests) |
+| R2 | 19 of 47 tests were stale and one test file was never collected. | ⏳ WP1 (24) and WP2 (18) suites rewritten |
 
 ## Results
 
@@ -23,7 +23,7 @@ Status legend: ⏳ pending · ✅ fixed
 | C2 | The cost-optimal GHP minimised a *linear* proxy (the Cook cost at 15 min, per minute), while results were evaluated on the convex Cook & Tanner curve. The optimiser concentrated very long delays on a few flights (maximum 674 min, against 224 min under RBS). | GHP cost scenario | ⏳ |
 | C3 | The airline fairness RSD reported (9.77 / 35.58 / 84.81 %) is the RSD of the top-4 airline mean delays. A later refactor replaced it with a per-flight RSD, and the delivered run printed 0 %. | Fairness KPI | ⏳ |
 | C4 | WP4 "total system CO₂" subtracts the CO₂ of the 11 rail-replaceable flights of the whole day (69.0 t) from a baseline that only covers the regulated window (9 of those flights, 57.0 t). The direct rail saving (43 t) also uses all 11 flights, while the text speaks of 9. | WP4 CO₂ figures | ⏳ |
-| C5 | Ground-delay CO₂ used a cruise-burn proxy in the WP2 heatmaps but FEGP ground power in WP3/WP4. | WP2 CO₂ heatmaps | ⏳ |
+| C5 | The WP2 sensitivity heatmaps charged ground delay at the flight's *cruise* fuel burn, although the code's own documentation (and WP3/WP4) treats an aircraft held at the gate as running on fixed electrical ground power. That put the CO₂ of ground delay at 4,445 t for the baseline GDP, instead of 11.7 t with FEGP. It also made the "CO₂ savings" heatmap numerically identical to the "ground-delay CO₂" heatmap. Both now use the same FEGP model as WP3/WP4 (`cost_model.co2_tierra_kg_por_min`). | WP2: the ground-delay CO₂ heatmap falls about 380×; the CO₂-savings heatmap now differs from it (4,433 t for R = 3000 km, H<sub>file</sub> = 150 min). Air delay, unrecoverable delay and cost heatmaps unchanged. | ✅ |
 | C6 | The report states that the GHP lowers the maximum delay; its own appendix table shows the opposite. Compression moved 222 flights (the report says 212). | Text only | ⏳ |
 | C7 | Flight distance was inferred from block time minus taxi time times a RECAT cruise speed. It underestimated short routes badly: Palma (202 km) came out as 0–115 km, and two Vueling flights got 6.8 km and an absurd 4.4 t of CO₂. Madrid flights (483 km) were often above 500 km and so missed the rail filter, although the report describes the filter as "orthodromic distance". Distances are now great-circle, from a coordinates table built from public-domain OurAirports data (`tools/build_airport_table.py`). | WP1: the GDP allocation, delays and costs are unchanged. System CO₂ +1.6 %; delay CO₂ −0.3 %. WP4: 18 rail-replaceable flights in the regulated window instead of 9 (every Madrid flight now qualifies), and the direct rail saving roughly doubles. Final WP4 figures depend on C4. | ✅ |
 
@@ -35,3 +35,21 @@ C4 quotes the figures obtained with the original distance model.
 - The trailing blank rows of the fleet table are dropped on load, and conflicting entries for the same aircraft type are rejected.
 - Callsigns that are not ICAO airline flights (one business jet using its registration, N818CA) are labelled `GA` instead of a fake airline "N81".
 - The flight list is sorted with a stable sort, so ties in ETA keep a deterministic order.
+
+### WP2 engine (no effect on the published results)
+
+- **Newell capacity curve.** The running capacity counter was not capped at
+  cumulative demand while the LVP was active, so capacity left idle during a
+  lull would have been "banked" and released later. On 10 August the queue
+  never empties during the regulation, so the results are unchanged, but the
+  model is now correct for any demand profile. ETAs with seconds are binned to
+  their minute instead of being dropped from the demand curve.
+- **Missing slots raise.** If the queue does not clear before midnight, the
+  run stops with a clear error instead of returning flights without a slot.
+- **Naming.** The exemption parameter called `h_noreg` was actually the GDP
+  file-time offset (H<sub>file</sub>); it is now `h_file_offset`.
+- **Single implementation** of the unrecoverable-delay rule and of the
+  ground-CO₂ rate, shared by WP2 and the metrics engine.
+- **Speed.** Penalty-and-compression ran inside every one of the 42
+  sensitivity simulations and the WP4 re-simulation without being used; it now
+  runs once. Full pipeline 208 s → 169 s.

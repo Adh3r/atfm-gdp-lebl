@@ -104,7 +104,7 @@ def simular_sin_vuelos_cortos(df_vuelos_original: pd.DataFrame, params: dict, ve
     df_reducido = df_con_marca[~df_con_marca['es_substituible']].copy()
 
     # 1. Re-ejecutar GDP (RBS) para obtener nuevos slots
-    resultados_gdp_red = gdp.ejecutar_nucleo_gdp(df_reducido, params, run_ghp=False)
+    resultados_gdp_red = gdp.ejecutar_nucleo_gdp(df_reducido, params, run_compression=False)
     
     # 2. Re-ejecutar GHP completo (Cook & Tanner) sobre la red descongestionada
     if verbose: print(" 🔄 Re-optimizando GHP (Cook & Tanner) para escenario intermodal...")

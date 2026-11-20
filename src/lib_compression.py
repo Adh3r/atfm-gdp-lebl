@@ -80,11 +80,11 @@ def penalty_and_compression(df_vuelos_asignados: pd.DataFrame, num_penalizados: 
         
         if not elegibles_dueña.empty:
             #the owner airline moves the flight to an early slot
-            vuelo_seleccionado_idx = elegibles_dueña.sort_values('assigned_slot').index[0]
+            vuelo_seleccionado_idx = elegibles_dueña.sort_values('assigned_slot', kind='stable').index[0]
         else:
             # COMPRESSION 2: if the owner can't fill the slot, it frees the ownership
             # we give the slot to the next flight with the earliest ETA
-            vuelo_seleccionado_idx = elegibles.sort_values('minutes_eta').index[0]
+            vuelo_seleccionado_idx = elegibles.sort_values(['minutes_eta', 'assigned_slot'], kind='stable').index[0]
 
         # EXECUTE CHANGES 
 

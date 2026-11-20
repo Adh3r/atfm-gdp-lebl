@@ -1,9 +1,10 @@
 import pandas as pd
 
 from cost_model import (
-    FEGP_KW_PER_RECAT, GRID_EMISSION_FACTOR_KG_KWH, LOAD_FACTOR_EU,
-    OTP_THRESHOLD_MIN, _PAX_BASE_TABLE, _interpolar_coste, _mapear_tipo_cook,
+    LOAD_FACTOR_EU, OTP_THRESHOLD_MIN, _PAX_BASE_TABLE,
+    _interpolar_coste, _mapear_tipo_cook, co2_tierra_kg_por_min,
 )
+from lib_gdp_core import calcular_retraso_irrecuperable
 
 
 def evaluar_escenario(df_res: pd.DataFrame, nombre_escenario: str, h_start_min: int) -> dict:
@@ -42,15 +43,7 @@ def evaluar_escenario(df_res: pd.DataFrame, nombre_escenario: str, h_start_min: 
     otp_pct = (vuelos_otp / n_flights) * 100 if n_flights > 0 else 0
 
     # Retraso Irrecuperable (Cancelación en H_START)
-    ctd = df['minutes_etd'] + df['ground_delay']
-    unrecoverable = pd.Series(0.0, index=df.index)
-    
-    caso2 = ctd <= h_start_min
-    unrecoverable[caso2] = df.loc[caso2, 'ground_delay']
-    
-    caso3 = (df['minutes_etd'] < h_start_min) & (ctd > h_start_min)
-    unrecoverable[caso3] = h_start_min - df.loc[caso3, 'minutes_etd']
-    retraso_irrecuperable = unrecoverable.sum()
+    retraso_irrecuperable = calcular_retraso_irrecuperable(df, h_start_min).sum()
 
     # ---------------------------------------------------------
     # 2. KPIs AMBIENTALES (CO2)
@@ -61,12 +54,7 @@ def evaluar_escenario(df_res: pd.DataFrame, nombre_escenario: str, h_start_min: 
     else:
         co2_aire_delay = 0.0
 
-    def _get_fegp_co2(recat):
-        recat_str = str(recat).upper() if pd.notna(recat) else 'D'
-        potencia_kw = FEGP_KW_PER_RECAT.get(recat_str, 72.0)
-        return potencia_kw * (1 / 60.0) * GRID_EMISSION_FACTOR_KG_KWH
-
-    co2_rate_tierra = df.get('recat', pd.Series('D', index=df.index)).apply(_get_fegp_co2)
+    co2_rate_tierra = df.get('recat', pd.Series('D', index=df.index)).apply(co2_tierra_kg_por_min)
     co2_tierra_delay = (co2_rate_tierra * df['ground_delay']).sum()
 
     # ---------------------------------------------------------
