@@ -14,12 +14,12 @@ import lib_excel_export  as excel
 import lib_sensitivity   as sens
 import lib_visualization as vis
 import lib_intermodal    as inter 
-from lib_metrics         import evaluar_escenario # <-- NUEVO MOTOR DE MÉTRICAS
+from lib_metrics         import evaluar_escenario, resumen_escenarios # <-- NUEVO MOTOR DE MÉTRICAS
 
 import config
 from config import CFG, FS_CONTROLLED
 from lib_gdp_core import calcular_retraso_minimo_newell
-from lib_ghp_solver import ejecutar_ghp_completo
+from lib_ghp_solver import MAX_AIR_DELAY_MIN, ejecutar_ghp_completo
 
 # =============================================================================
 # ORQUESTADOR PRINCIPAL
@@ -64,7 +64,7 @@ def ejecutar_proyecto_completo() -> None:
     print("🛫 [WP2] EJECUTANDO MOTOR DE SIMULACIÓN GDP (Algoritmo RBS)")
     print("═" * 70)
     
-    resultados = gdp.ejecutar_nucleo_gdp(df_vuelos, params, run_ghp=False)
+    resultados = gdp.ejecutar_nucleo_gdp(df_vuelos, params)
 
     df_final = resultados['vuelos_asignados']
     df_slots = resultados['slots']
@@ -89,120 +89,53 @@ def ejecutar_proyecto_completo() -> None:
     print("   ✅ Matrices guardadas y Heatmaps generados.")
 
     # -------------------------------------------------------------------------
-    # WP3: OPTIMIZACIÓN GHP Y ANÁLISIS DE EQUIDAD
+    # WP3: GROUND HOLDING PROBLEM (GHP)
     # -------------------------------------------------------------------------
     print("\n" + "═" * 70)
-    print("🧠 [WP3] EJECUTANDO OPTIMIZACIÓN GHP Y EQUIDAD (RSD)")
+    print("🧠 [WP3] GROUND HOLDING PROBLEM (emissions and cost objectives)")
     print("═" * 70)
-    
-    resultados_ghp = ejecutar_ghp_completo(
-        df_vuelos_etiquetados=df_final, 
-        slots_disponibles=slots_list, 
-        params=params,
-        verbose=False 
-    )
-    
-    # Evaluamos y almacenamos los escenarios GHP usando el motor unificado
-    for nombre_task in ['GDP_Aditional_Constraints', 'GHP_Opt_Emissions', 'GHP_Opt_Cost']:
-        df_task = resultados_ghp[nombre_task]
-        escenarios_dict[f'WP3_{nombre_task}'] = df_task
-        lista_kpis.append(evaluar_escenario(df_task, f'WP3_{nombre_task}', h_start_min))
-    
-    # Construimos el Dashboard Comparativo (DataFrame) maestro
+
+    resultados_ghp = ejecutar_ghp_completo(df_final, slots_list, params)
+
+    # Task 1 validation: with r_f = 1 the GHP must reproduce the RBS total delay.
+    total_rbs = df_final['total_delay'].sum()
+    total_val = resultados_ghp['GHP_Validation']['total_delay'].sum()
+    estado = "OK" if abs(total_rbs - total_val) < 1e-6 else "MISMATCH"
+    print(f"   • Validation (r_f = 1): GHP {total_val:.1f} min vs RBS {total_rbs:.1f} min -> {estado}")
+    print(f"   • Max air delay <= {MAX_AIR_DELAY_MIN} min in every scenario: "
+          f"{'yes' if resultados_ghp['max_air_delay_ok'] else 'NO'}")
+
+    escenarios_wp3 = {
+        'GDP (RBS)':        df_final,
+        'GHP emissions':    resultados_ghp['GHP_Emissions'],
+        'GHP cost':         resultados_ghp['GHP_Cost'],
+    }
+    kpis_wp3 = {n: evaluar_escenario(d, n, h_start_min) for n, d in escenarios_wp3.items()}
+    escenarios_dict = dict(escenarios_wp3)
+    lista_kpis = list(kpis_wp3.values())
     df_dashboard = pd.DataFrame(lista_kpis)
 
-    # -------------------------------------------------------------------------
-    # --- REFORMATAR TABLA WP3 PARA IGUALAR A WP4 ---
-    # -------------------------------------------------------------------------
-    
-    # Cálculos previos necesarios para igualar las métricas
-    demanda_total = len(df_final)
-    # Por si la columna de CO2 se genera en otro lado, pillamos de df_final o df_vuelos
-    co2_nominal_base = df_final['co2_kg_vuelo'].sum() if 'co2_kg_vuelo' in df_final.columns else df_vuelos['co2_kg_vuelo'].sum()
-    
-    h_noreg_base = resultados['h_noreg'] 
-    duracion_impacto = h_noreg_base - params.get('H_START', 0)
-
-    # Función auxiliar para extraer datos de df_dashboard
-    def get_kpi(escenario, columna):
-        return df_dashboard.loc[df_dashboard['Escenario'] == escenario, columna].iloc[0]
-
-    # Creamos la tabla con la misma estructura exacta que WP4
-    comparativa_wp3 = pd.DataFrame({
-        'Métrica': [
-            'Demanda total (vuelos)',
-            'Retraso total GDP (min)',
-            'HNoReg — Cola disuelta (min UTC)',
-            'Duración impacto (min)',
-            'Emisiones CO₂ retraso (kg)',
-            'Emisiones CO₂ TOTAL Sistema (kg)', 
-            'Coste total retraso (EUR)',
-            'Ahorro neto CO₂ directo por Tren (kg)',
-            'Equidad RSD (%)'
-        ],
-        'GDP Basic Scenario': [
-            demanda_total,
-            round(get_kpi('GDP_Basic_Scenario', 'Retraso_Total_min'), 1),
-            h_noreg_base,
-            duracion_impacto,
-            round(get_kpi('GDP_Basic_Scenario', 'CO2_Total_Retraso_kg'), 1),
-            round(co2_nominal_base + get_kpi('GDP_Basic_Scenario', 'CO2_Total_Retraso_kg'), 1),
-            int(get_kpi('GDP_Basic_Scenario', 'Coste_Cook_Total_EUR')),
-            'N/A', 
-            round(get_kpi('GDP_Basic_Scenario', 'RSD_Total_%'), 2)
-        ],
-        'GDP Aditional Constraints': [
-            demanda_total,
-            round(get_kpi('WP3_GDP_Aditional_Constraints', 'Retraso_Total_min'), 1),
-            h_noreg_base,
-            duracion_impacto,
-            round(get_kpi('WP3_GDP_Aditional_Constraints', 'CO2_Total_Retraso_kg'), 1),
-            round(co2_nominal_base + get_kpi('WP3_GDP_Aditional_Constraints', 'CO2_Total_Retraso_kg'), 1),
-            int(get_kpi('WP3_GDP_Aditional_Constraints', 'Coste_Cook_Total_EUR')),
-            'N/A', 
-            round(get_kpi('WP3_GDP_Aditional_Constraints', 'RSD_Total_%'), 2)
-        ],
-        'GHP Opt Cost': [
-            demanda_total,
-            round(get_kpi('WP3_GHP_Opt_Cost', 'Retraso_Total_min'), 1),
-            h_noreg_base,
-            duracion_impacto,
-            round(get_kpi('WP3_GHP_Opt_Cost', 'CO2_Total_Retraso_kg'), 1),
-            round(co2_nominal_base + get_kpi('WP3_GHP_Opt_Cost', 'CO2_Total_Retraso_kg'), 1),
-            int(get_kpi('WP3_GHP_Opt_Cost', 'Coste_Cook_Total_EUR')),
-            'N/A', 
-            round(get_kpi('WP3_GHP_Opt_Cost', 'RSD_Total_%'), 2)
-        ],
-        'GHP Opt Emissions': [
-            demanda_total,
-            round(get_kpi('WP3_GHP_Opt_Emissions', 'Retraso_Total_min'), 1),
-            h_noreg_base,
-            duracion_impacto,
-            round(get_kpi('WP3_GHP_Opt_Emissions', 'CO2_Total_Retraso_kg'), 1),
-            round(co2_nominal_base + get_kpi('WP3_GHP_Opt_Emissions', 'CO2_Total_Retraso_kg'), 1),
-            int(get_kpi('WP3_GHP_Opt_Emissions', 'Coste_Cook_Total_EUR')),
-            'N/A', 
-            round(get_kpi('WP3_GHP_Opt_Emissions', 'RSD_Total_%'), 2)
-        ]
+    h_noreg_base = resultados['h_noreg']
+    comparativa_wp3 = resumen_escenarios(kpis_wp3, extras={
+        'HNoReg (min UTC)':  {n: h_noreg_base for n in escenarios_wp3},
     })
 
-    print("\n 📊 RESUMEN EJECUTIVO WP3 (Sin Intermodalidad):")
-    print(f"{'Métrica':>38} | {'GDP Basic Scenario':>18} | {'GDP Aditional Constraints':>18} | {'GHP Opt Cost':>20} | {'GHP Opt Emissions':>20}")
-    print("-" * 125)
-    for _, row in comparativa_wp3.iterrows():
-        print(f"{row['Métrica']:>38} | {str(row['GDP Basic Scenario']):>18} | {str(row['GDP Aditional Constraints']):>18} | {str(row['GHP Opt Cost']):>20} | {str(row['GHP Opt Emissions']):>20}")
+    print("\n 📊 WP3 SUMMARY (affected flights, same regulation and slots):")
+    print(comparativa_wp3.to_string(index=False))
 
-    # Guardamos ambos (el original crudo para auditoría y el visual para los gráficos)
     path_wp3_original = os.path.join(BASE_DIR, 'data/processed/wp3_dashboard_crudo.csv')
-    
-    # 🌟 AQUÍ ESTÁ LA MAGIA: Guardamos la comparativa que acabas de construir 
-    # directamente como wp3_resumen_ejecutivo.csv para que la lea el gráfico luego.
     path_wp3_resumen = os.path.join(BASE_DIR, 'data/processed/wp3_resumen_ejecutivo.csv')
-    
+    os.makedirs(os.path.dirname(path_wp3_resumen), exist_ok=True)
     df_dashboard.to_csv(path_wp3_original, index=False)
     comparativa_wp3.to_csv(path_wp3_resumen, index=False)
-    print(f"\n   ✅ Matrices comparativas guardadas en CSV.")
-    print(f"   ✅ Resumen Ejecutivo WP3 exportado a: {path_wp3_resumen}")
+
+    from lib_ghp_solver import generar_graficas_wp3
+    generar_graficas_wp3(
+        {'GDP': df_final, 'GHP_Emissions': resultados_ghp['GHP_Emissions'],
+         'GHP_Cost': resultados_ghp['GHP_Cost']},
+        os.path.join(BASE_DIR, 'output', 'figures', 'wp3'),
+    )
+    print(f"   ✅ WP3 tables: {os.path.relpath(path_wp3_resumen, BASE_DIR)}; figures: output/figures/wp3/")
 
     
 
@@ -219,9 +152,9 @@ def ejecutar_proyecto_completo() -> None:
             df_tabla_intermodal = resultados_wp4['df_comparativa']
             
             # 2. Capturamos los resultados del GHP para las DOS funciones de coste
-            df_intermodal_gdp = resultados_wp4['resultados_reducido']['resultados_ghp']['GDP_Aditional_Constraints']
-            df_intermodal_coste = resultados_wp4['resultados_reducido']['resultados_ghp']['GHP_Opt_Cost']
-            df_intermodal_co2 = resultados_wp4['resultados_reducido']['resultados_ghp']['GHP_Opt_Emissions']
+            df_intermodal_gdp = resultados_wp4['resultados_reducido']['resultados_gdp']['vuelos_asignados']
+            df_intermodal_coste = resultados_wp4['resultados_reducido']['resultados_ghp']['GHP_Cost']
+            df_intermodal_co2 = resultados_wp4['resultados_reducido']['resultados_ghp']['GHP_Emissions']
             
             # 3. Los inyectamos en el diccionario general de escenarios
             escenarios_dict['Intermodal_GDP'] = df_intermodal_gdp

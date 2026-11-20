@@ -23,7 +23,6 @@
 import os
 import numpy as np
 import pandas as pd
-from scipy.optimize import milp, Bounds, LinearConstraint #librerias para trabajar con linear programing en python
 
 import config
 from config import (
@@ -358,64 +357,6 @@ def calcular_delays(df_res: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-def resolve_ghp_intlinprog(df_vuelos, slots, r_f=1):
-    #resolver GHP como programacion lineal de ints
-    #objective function = min sum(coste*delay)
-
-    vuelos = df_vuelos.copy().reset_index()
-    num_vuelos = len(vuelos)
-    num_slots = len(slots)
-
-    #definir los costes, cuando r = 1 estamos haciendo la verification task
-    cost_matrix = np.zeros((num_vuelos, num_slots))
-
-    for f in range(num_vuelos):
-        eta_f = vuelos.loc[f, 'minutes_eta']
-        for t in range (num_slots):
-            slot_time = slots [t]
-            if slot_time < eta_f:
-                #aplicamos el metodo de la M asignando un numero de penalizacion enorme a un vuelo para que no pueda llegar ant4es de su ETA
-                cost_matrix[f, t] = 1e10
-            else:
-                #coste = delay * factor de coste del vuelo (r)
-                cost_matrix[f,t] = (slot_time - eta_f) * r_f
-    #ahora convertimos el la matriz en el vector c para poder resolverlo con el solver
-    c = cost_matrix.flatten()
-    #CONSTRAINTS:
-    #--> Cada vuelo tiene exactamente un slot
-    A_eq_vuelos = np.zeros((num_vuelos, num_slots * num_vuelos))
-    for f in range (num_vuelos):
-        A_eq_vuelos[f, f*num_slots : (f+1)*num_slots] = 1
-    b_eq_vuelos = np.ones(num_vuelos)
-    #--> cada slot tiene exctamente un vuelo
-    A_ub_slots = np.zeros((num_slots, num_vuelos*num_slots))
-    for t in range(num_slots):
-        A_ub_slots[t, t::num_slots] = 1
-    b_ub_slots = np.ones(num_slots)
-    #Resolvenos integer linear programing con variables binarias
-    res = milp(
-        c=c,
-        constraints=[
-            LinearConstraint(A_eq_vuelos, b_eq_vuelos, b_eq_vuelos), # Igual a 1
-            LinearConstraint(A_ub_slots, 0, b_ub_slots)             # Menor o igual a 1
-        ],
-        integrality=np.ones_like(c), # Todas las variables son enteras (0 o 1)
-        bounds=Bounds(0, 1)
-    )
-
-    if res.success:
-        #cosntruimos la solucion
-        x = res.x.reshape((num_vuelos, num_slots))
-        asignaciones = []
-        for f in range(num_vuelos):
-            slot_idx = np.argmax(x[f, :])
-            asignaciones.append(slots[slot_idx])
-        
-        vuelos['assigned_slot'] = asignaciones
-        return vuelos
-    else:
-        raise ValueError("no se encontro solucion")
-
 # =============================================================================
 # 5. RETRASO MÍNIMO TEÓRICO — ¿CUÁL ES EL MÍNIMO INEVITABLE?
 # =============================================================================
@@ -545,7 +486,6 @@ def ejecutar_nucleo_gdp(
     params: dict,
     radius_km: int       = CFG.GDP_RADIUS_KM,
     h_file_offset: int = CFG.H_FILE_OFFSET,
-    run_ghp: bool        = False,
     run_compression: bool = True,
 ) -> dict:
     """
@@ -623,37 +563,6 @@ def ejecutar_nucleo_gdp(
         )
     df_resultado_original = calcular_delays(df_resultado_original)
     
-    # Calculamos el total de RBS fuera del IF para que la variable siempre exista
-    retraso_rbs = df_resultado_original['total_delay'].sum()
-
-    # --- INICIO BLOQUE OPTIMIZACIÓN GHP (Solo si run_ghp=True) ---
-    df_resultado_ghp = None # Por defecto es None para las 42 casillas
-    
-    if run_ghp:
-        print("\n" + "⚙️  Ejecutando optimización GHP para validación...")
-        
-        # Ejecutamos la optimización (Task 1: r_f = 1)
-        df_resultado_ghp = resolve_ghp_intlinprog(
-            df_vuelos=df_en_ventana, 
-            slots=df_slots['slot_start_min'].values, 
-            r_f=1
-        )
-        df_resultado_ghp = calcular_delays(df_resultado_ghp)
-        retraso_ghp = df_resultado_ghp['total_delay'].sum()
-
-        # Ahora que AMBOS están calculados, imprimimos la comparativa
-        print("\n" + "═"*50)
-        print("🚀 VALIDACIÓN TASK 1: RBS vs OPTIMIZACIÓN")
-        print(f"   • Retraso Total RBS: {retraso_rbs:.2f} min")
-        print(f"   • Retraso Total GHP: {retraso_ghp:.2f} min")
-        print("─"*50)
-
-        if abs(retraso_rbs - retraso_ghp) < 0.1:
-            print("   ✅ ¡ÉXITO! Los resultados coinciden.")
-        else:
-            print("   ❌ ERROR: Los resultados difieren.")
-        print("═"*50 + "\n")
-    # --- FIN BLOQUE OPTIMIZACIÓN ---
 
     # PASO 5: Compresión (WP 2)
     df_resultado_comprimido = None
@@ -669,7 +578,6 @@ def ejecutar_nucleo_gdp(
         'vuelos_asignados': df_resultado_original, 
         'slots': df_slots_original,
         'vuelos_comprimidos': df_resultado_comprimido,
-        'vuelos_ghp': df_resultado_ghp, # para si luego hacemos un grafico
         'vuelos_crudos': df_vuelos,
         'timeline': timeline,
         'h_noreg': h_noreg,

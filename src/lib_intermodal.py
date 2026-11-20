@@ -136,9 +136,9 @@ def generar_comparativa_intermodal(
     h_noreg_red = resultados_reducido['resultados_gdp']['h_noreg']
 
     # 2. Extraemos los DataFrames re-simulados (Intermodales)
-    df_red_GDP  = resultados_reducido['resultados_ghp']['GDP_Aditional_Constraints']
-    df_red_co2  = resultados_reducido['resultados_ghp']['GHP_Opt_Emissions']
-    df_red_cost = resultados_reducido['resultados_ghp']['GHP_Opt_Cost'] 
+    df_red_GDP  = resultados_reducido['resultados_gdp']['vuelos_asignados']   # RBS
+    df_red_co2  = resultados_reducido['resultados_ghp']['GHP_Emissions']
+    df_red_cost = resultados_reducido['resultados_ghp']['GHP_Cost'] 
     
     # 3. Calculamos KPIs con el MISMO MOTOR que el WP3 (lib_metrics)
     kpis_red_GDP  = evaluar_escenario(df_red_GDP, 'Intermodal_GDP', h_start_min)

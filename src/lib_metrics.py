@@ -1,16 +1,13 @@
 import pandas as pd
 
-from cost_model import (
-    LOAD_FACTOR_EU, OTP_THRESHOLD_MIN, _PAX_BASE_TABLE,
-    _interpolar_coste, _mapear_tipo_cook, co2_tierra_kg_por_min,
-)
+from cost_model import OTP_THRESHOLD_MIN, co2_tierra_kg_por_min, coste_retraso_eur
 from lib_gdp_core import calcular_retraso_irrecuperable
 
 
 def evaluar_escenario(df_res: pd.DataFrame, nombre_escenario: str, h_start_min: int) -> dict:
     """
     Motor Unificado de Métricas (Unified Metrics Engine).
-    Calcula KPIs Operacionales, Ambientales (Delgado + FEGP), Económicos (Cook 2015) 
+    Calcula KPIs Operacionales, Ambientales (Montlaur et al. 2025 + FEGP), Económicos (Cook & Tanner 2015) 
     y de Equidad (RSD) de forma estandarizada para cualquier escenario.
     """
     if df_res.empty:
@@ -60,27 +57,22 @@ def evaluar_escenario(df_res: pd.DataFrame, nombre_escenario: str, h_start_min: 
     # ---------------------------------------------------------
     # 3. KPIs ECONÓMICOS (Cook & Tanner 2015)
     # ---------------------------------------------------------
+    # Same cost function as the GHP cost objective (WP3 Task 5: the GDP is
+    # costed with the same coefficients). Ground delay is costed at the gate,
+    # air delay en route (Cook & Tanner tactical tables).
     costes_individuales = []
-    for i, row in df.iterrows():
-        delay_real = float(row.get('total_delay', 0) or 0)
-        if delay_real <= 0:
-            costes_individuales.append(0.0)
-            continue
+    for _, row in df.iterrows():
+        aire = float(row.get('air_delay', 0) or 0)
+        tierra = float(row.get('ground_delay', 0) or 0)
+        coste = 0.0
+        if tierra > 0:
+            coste += coste_retraso_eur(row.get('ATYP', ''), row.get('recat', 'D'),
+                                       row.get('size_seats_avg', 180), tierra, 'at_gate')
+        if aire > 0:
+            coste += coste_retraso_eur(row.get('ATYP', ''), row.get('recat', 'D'),
+                                       row.get('size_seats_avg', 180), aire, 'en_route')
+        costes_individuales.append(coste)
 
-        tipo_icao = str(row.get('ATYP', row.get('f', ''))).upper().strip()
-        recat     = str(row.get('recat', 'D')).upper()
-        asientos  = max(int(row.get('size_seats_avg', 180) or 180), 1)
-
-        tipo_cook = _mapear_tipo_cook(tipo_icao, recat, asientos)
-        usar_hard = delay_real >= OTP_THRESHOLD_MIN
-        coste_tabla = _interpolar_coste(tipo_cook, delay_real, usar_hard)
-
-        pax_base   = _PAX_BASE_TABLE.get(tipo_cook, 130)
-        pax_reales = max(int(asientos * LOAD_FACTOR_EU), 1)
-        factor_pax = pax_reales / pax_base
-
-        costes_individuales.append(coste_tabla * factor_pax)
-    
     df['coste_retraso_eur'] = costes_individuales
     coste_total = sum(costes_individuales)
     coste_maximo = max(costes_individuales) if costes_individuales else 0.0
@@ -94,10 +86,17 @@ def evaluar_escenario(df_res: pd.DataFrame, nombre_escenario: str, h_start_min: 
     rsd_ground = (df['ground_delay'].std() / df['ground_delay'].mean() * 100) if df['ground_delay'].mean() > 0 else 0
     rsd_total = (df['total_delay'].std() / df['total_delay'].mean() * 100) if df['total_delay'].mean() > 0 else 0
 
-    # Extracción Top 4 Aerolíneas
+    # Airline level (WP3 Task 4): the 4 airlines with most affected flights.
+    # For each: mean delay and RSD of its flights' delays. Across them, the
+    # RSD of the four mean delays is the fairness index used in the report
+    # (0 % = every airline gets the same mean delay).
     top_airlines_data = {}
-    if 'airline' in df.columns:  # Asegura que usas la columna correcta del indicativo (Opr o ARCID[:3])
+    rsd_aerolineas = 0.0
+    if 'airline' in df.columns:
         top_4 = df['airline'].value_counts().head(4).index
+        medias = df[df['airline'].isin(top_4)].groupby('airline')['total_delay'].mean()
+        if len(medias) > 1 and medias.mean() > 0:
+            rsd_aerolineas = medias.std(ddof=0) / medias.mean() * 100
         for idx, al in enumerate(top_4, start=1):
             df_al = df[df['airline'] == al]
             avg_al = df_al['total_delay'].mean()
@@ -133,9 +132,42 @@ def evaluar_escenario(df_res: pd.DataFrame, nombre_escenario: str, h_start_min: 
         'RSD_Aire_%':            round(rsd_air, 2),
         'RSD_Tierra_%':          round(rsd_ground, 2),
         'RSD_Total_%':           round(rsd_total, 2),
+        'RSD_Aerolineas_%':      round(rsd_aerolineas, 2),
     }
     
     # Añadimos los datos de las aerolíneas dinámicamente si existen
     kpis.update(top_airlines_data)
 
     return kpis
+
+# Rows of the summary tables shared by WP3, WP4 and WP5.
+FILAS_RESUMEN = [
+    ('Affected flights',                 'Vuelos_Totales'),
+    ('Delayed flights',                  'Vuelos_Retrasados'),
+    ('Total delay (min)',                'Retraso_Total_min'),
+    ('Air delay (min)',                  'Retraso_Aire_min'),
+    ('Ground delay (min)',               'Retraso_Tierra_min'),
+    ('Mean delay (min/flight)',          'Retraso_Medio_min'),
+    ('Max delay (min)',                  'Retraso_Max_min'),
+    ('Max air delay (min)',              'Retraso_Aire_Max_min'),
+    ('OTP, delay < 15 min (%)',          'OTP_%_Menor_15min'),
+    ('Unrecoverable delay (min)',        'Retraso_Irrecup_min'),
+    ('Delay CO2 (kg)',                   'CO2_Total_Retraso_kg'),
+    ('Cost of delay (EUR)',              'Coste_Cook_Total_EUR'),
+    ('Airline fairness: RSD of top-4 mean delays (%)', 'RSD_Aerolineas_%'),
+]
+
+
+def resumen_escenarios(kpis_por_escenario: dict, extras: dict | None = None) -> pd.DataFrame:
+    """
+    Summary table: one column per scenario, one row per KPI (FILAS_RESUMEN),
+    plus optional extra rows {row label: {scenario: value}}.
+    """
+    tabla = {'Metric': [r[0] for r in FILAS_RESUMEN]}
+    for nombre, kpis in kpis_por_escenario.items():
+        tabla[nombre] = [round(kpis[clave], 2) for _, clave in FILAS_RESUMEN]
+    df = pd.DataFrame(tabla)
+    for etiqueta, valores in (extras or {}).items():
+        fila = {'Metric': etiqueta, **{n: valores.get(n) for n in kpis_por_escenario}}
+        df = pd.concat([df, pd.DataFrame([fila])], ignore_index=True)
+    return df
