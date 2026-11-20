@@ -1,376 +1,77 @@
-# =============================================================================
-# test/test_excel_export.py
-# Tests automatizados para lib_excel_export.py
-#
-# ¿Por qué estos tests concretos?
-# Los tres bugs que aparecieron durante el desarrollo de esta fase fueron:
-#   1. Listas de distinta longitud en _sheet_parametros → ValueError de pandas
-#   2. Referencias a columnas renombradas (assigned_slot, CTA...) → KeyError
-#   3. Argumentos pasados en el orden o con el nombre incorrecto → TypeError
-#
-# Estos tests detectan exactamente esos tres tipos de error antes de que
-# lleguen a la ejecución del proyecto completo.
-#
-# Cómo ejecutarlos:
-#   python -m pytest test/ -v
-# =============================================================================
+"""Tests for the Excel workbook (src/lib_excel_export.py) and the WP5 comparison (src/lib_comparison.py)."""
 
 import os
 import sys
-import tempfile
-import shutil
-import unittest
 
+import openpyxl
 import pandas as pd
-import numpy as np
+import pytest
 
-# Añadimos src/ al path para poder importar los módulos del proyecto
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, 'src'))
 
-import lib_excel_export as excel
-from config import CFG, FS_CONTROLLED, FS_EXEMPT_INTERNATIONAL, FS_EXEMPT_FLYING, FS_EXEMPT_RADIUS
+import config  # noqa: E402
+import lib_data_prep as prep  # noqa: E402
+import lib_excel_export as excel  # noqa: E402
+import lib_gdp_core as gdp  # noqa: E402
+from config import CFG  # noqa: E402
+from lib_comparison import KPA_POR_KPI, tabla_final  # noqa: E402
+from lib_ghp_solver import ejecutar_ghp_completo  # noqa: E402
+from lib_intermodal import ejecutar_analisis_intermodal  # noqa: E402
+from lib_metrics import FILAS_RESUMEN, evaluar_escenario, resumen_escenarios  # noqa: E402
 
-
-# =============================================================================
-# DATOS SINTÉTICOS COMPARTIDOS
-# Generamos DataFrames mínimos que simulan la salida real del pipeline
-# sin necesidad de ejecutar el proyecto completo.
-# =============================================================================
-
-def _hacer_df_res_minimo() -> pd.DataFrame:
-    """
-    Crea un DataFrame de resultados GDP mínimo pero válido.
-    Contiene todas las columnas que lib_excel_export.py necesita.
-    """
-    return pd.DataFrame({
-        'ARCID':         ['IBE001', 'BAW002', 'UAE003', 'VLG004', 'AFR005'],
-        'airline':       ['IBE',    'BAW',    'UAE',    'VLG',    'AFR'],
-        'ADEP':          ['LEMD',   'EGLL',   'OMDB',   'LEMD',   'LFPG'],
-        'ATYP':          ['B738',   'A320',   'B77W',   'A320',   'A319'],
-        'recat':         ['D',      'D',      'C',      'D',      'D'],
-        'is_ecac':       [True,     True,     False,    True,     True],
-        'distancia_km':  [500.0,    1800.0,   4200.0,   500.0,    1100.0],
-        'minutes_eta':   [390.0,    410.0,    430.0,    450.0,    470.0],
-        'assigned_slot': [395.0,    415.0,    430.0,    460.0,    480.0],
-        'total_delay':   [5.0,      5.0,      0.0,      10.0,     10.0],
-        'air_delay':     [0.0,      0.0,      0.0,      0.0,      0.0],
-        'ground_delay':  [5.0,      5.0,      0.0,      10.0,     10.0],
-        'flight_status': [
-            FS_CONTROLLED, FS_CONTROLLED, FS_EXEMPT_INTERNATIONAL,
-            FS_CONTROLLED, FS_CONTROLLED,
-        ],
-    })
+PARAMS = CFG.to_params_dict()
 
 
-def _hacer_r_min_newell() -> float:
-    """
-    Valor sintético del retraso mínimo teórico de Newell.
-    Se pasa directamente a _sheet_parametros y exportar_auditoria_excel
-    en lugar del timeline completo — el cálculo ya no ocurre dentro del Excel.
-    """
-    return 1250.0
+@pytest.fixture(scope='module')
+def pipeline(tmp_path_factory):
+    out = tmp_path_factory.mktemp('run')
+    df = prep.preparar_vuelos(config.SAMPLE_TRAFFIC, config.FLEET_TABLE)
+    res = gdp.ejecutar_nucleo_gdp(df, PARAMS)                         # with compression
+    rbs = res['vuelos_asignados']
+    ghp = ejecutar_ghp_completo(rbs, list(res['slots']['slot_start_min']), PARAMS)
+    wp4 = ejecutar_analisis_intermodal(df, res, ghp, PARAMS, str(out))
+    escenarios = {'GDP (RBS)': rbs, 'GHP emissions': ghp['GHP_Emissions'], 'GHP cost': ghp['GHP_Cost']}
+    kpis = {n: evaluar_escenario(d, n, PARAMS['H_START']) for n, d in escenarios.items()}
+    wp3 = resumen_escenarios(kpis)
+    wp5 = tabla_final(wp4['df_comparativa'])
+    path = os.path.join(str(out), 'audit.xlsx')
+    excel.exportar_auditoria_excel(
+        df_vuelos_crudo=df, escenarios_dict=escenarios, df_dashboard=pd.DataFrame(kpis.values()),
+        df_slots=res['slots'], params=PARAMS, h_noreg=res['h_noreg'], timeline=res['timeline'],
+        r_min_newell=gdp.calcular_retraso_minimo_newell(res['timeline']), path=path,
+        df_res_comprimido=res['vuelos_comprimidos'], df_intermodal=wp4['df_comparativa'],
+        tablas_resumen={'WP3_GHP_vs_GDP': wp3, 'WP4_Intermodal': wp4['df_comparativa'], 'WP5_Final_by_KPA': wp5},
+    )
+    return {'path': path, 'res': res, 'wp5': wp5, 'escenarios': escenarios}
 
 
-def _hacer_params_minimo() -> dict:
-    """Parámetros mínimos del escenario GDP."""
-    return {
-        'H_START':         CFG.H_START,
-        'H_END':           CFG.H_END,
-        'AAR':             CFG.AAR,
-        'PAAR':            CFG.PAAR,
-        'SLOT_NOM':        CFG.SLOT_NOM,
-        'SLOT_RED':        CFG.SLOT_RED,
-        'H_FREEZE_OFFSET': CFG.H_FREEZE_OFFSET,
-    }
+def test_workbook_has_every_sheet(pipeline):
+    hojas = openpyxl.load_workbook(pipeline['path'], read_only=True).sheetnames
+    for esperado in ['00_Dashboard_KPIs', 'WP3_GHP_vs_GDP', 'WP4_Intermodal', 'WP5_Final_by_KPA',
+                     'Audit_GDP (RBS)', 'Audit_GHP emissions', 'Audit_GHP cost',
+                     'WP2_Compression', 'Config_Escenario', 'Config_Slots']:
+        assert esperado in hojas
 
 
-def _hacer_df_slots_minimo() -> pd.DataFrame:
-    """Matriz de slots mínima."""
-    return pd.DataFrame({
-        'slot_start_min': [390.0, 393.0, 396.0, 399.0, 402.0],
-        'occupied':       [True,  True,  False, True,  True],
-        'flight_id':      [0,     1,     None,  3,     4],
-    })
+def test_audit_sheet_has_one_row_per_affected_flight(pipeline):
+    ws = openpyxl.load_workbook(pipeline['path'], read_only=True)['Audit_GDP (RBS)']
+    filas = list(ws.iter_rows(values_only=True))
+    assert len(filas) - 1 == len(pipeline['escenarios']['GDP (RBS)'])
+    assert {'CTA', 'CTD', 'flight_status'} <= set(filas[0])
 
 
-def _hacer_df_crudos_minimo() -> pd.DataFrame:
-    """DataFrame de vuelos crudos mínimo (antes del GDP)."""
-    return pd.DataFrame({
-        'ARCID': ['IBE001', 'BAW002', 'UAE003', 'VLG004', 'AFR005'],
-        'ADEP':  ['LEMD',   'EGLL',   'OMDB',   'LEMD',   'LFPG'],
-        'ADES':  ['LEBL'] * 5,
-        'ETA':   ['06:30', '06:50', '07:10', '07:30', '07:50'],
-    })
+def test_compression_sheet_matches_the_compression_run(pipeline):
+    res = pipeline['res']
+    tabla = excel.tabla_compresion(res['vuelos_asignados'], res['vuelos_comprimidos'])
+    assert (tabla['status'] == 'Cancelled (penalty)').sum() == 12
+    movidos = tabla[tabla['status'] == 'Moved earlier (compression)']
+    assert len(movidos) > 0
+    assert (movidos['minutes_saved'] > 0).all()                     # the old sheet always reported 0
+    assert (movidos['CTA_after'] >= movidos['ETA']).all()
 
 
-# =============================================================================
-# TEST CLASE 1 — Integridad de las listas en _sheet_parametros
-#
-# Bug que previene: ValueError "All arrays must be of the same length"
-# Causa original:  Se añadió una fila a 'Parámetro' sin añadir la
-#                  correspondiente en 'Valor' y 'Fuente / Nota'.
-# =============================================================================
-
-class TestSheetParametrosLongitudes(unittest.TestCase):
-    """
-    Verifica que las tres listas del DataFrame de _sheet_parametros
-    tienen exactamente la misma longitud.
-
-    Si alguien añade una fila a 'Parámetro' sin añadir su correspondiente
-    en 'Valor' o 'Fuente', este test falla inmediatamente con un mensaje
-    claro en lugar de un ValueError críptico al ejecutar el proyecto.
-    """
-
-    def test_no_lanza_value_error(self):
-        """
-        El test más importante: que la función se ejecute sin lanzar
-        ValueError. Si las listas tienen distinta longitud, pandas lanza
-        este error al construir el DataFrame.
-        """
-        from openpyxl import Workbook
-        wb = Workbook()
-
-        params       = _hacer_params_minimo()
-        r_min_newell = _hacer_r_min_newell()
-
-        # Si las listas tienen distinta longitud, esto lanza ValueError
-        try:
-            excel._sheet_parametros(wb, params, 900, r_min_newell)
-        except ValueError as e:
-            self.fail(
-                f"_sheet_parametros lanzó ValueError: {e}\n"
-                f"Causa probable: una lista tiene más o menos elementos que las otras."
-            )
-
-    def test_pestaña_creada_en_workbook(self):
-        """
-        Verifica que la función crea efectivamente la pestaña en el workbook.
-        """
-        from openpyxl import Workbook
-        wb = Workbook()
-        excel._sheet_parametros(wb, _hacer_params_minimo(), 900, _hacer_r_min_newell())
-        self.assertIn('0_Parametros_GDP', wb.sheetnames)
-
-
-# =============================================================================
-# TEST CLASE 2 — Columnas del DataFrame de resultados
-#
-# Bug que previene: KeyError cuando una columna ha sido renombrada
-# Causa original:  Renombrar 'assigned_slot' en algunos sitios pero no en
-#                  otros, o cambiar nombres de columnas sin actualizar
-#                  todas las referencias.
-# =============================================================================
-
-class TestColumnasDataFrames(unittest.TestCase):
-    """
-    Verifica que el DataFrame de resultados contiene todas las columnas
-    que lib_excel_export.py necesita para construir el Excel.
-
-    Si alguien renombra una columna en lib_gdp_core.py, estos tests
-    fallan inmediatamente señalando exactamente qué columna falta.
-    """
-
-    def setUp(self):
-        self.df_res = _hacer_df_res_minimo()
-
-    def test_columnas_obligatorias_existen(self):
-        """
-        Estas columnas deben existir en df_res. Si falta alguna,
-        el test dice exactamente cuál es.
-        """
-        columnas_obligatorias = [
-            'ARCID', 'airline', 'ADEP', 'ATYP', 'recat',
-            'is_ecac', 'distancia_km', 'minutes_eta',
-            'assigned_slot',   # nombre interno — NO renombrar sin actualizar aquí
-            'total_delay', 'air_delay', 'ground_delay', 'flight_status',
-        ]
-        for col in columnas_obligatorias:
-            self.assertIn(
-                col, self.df_res.columns,
-                msg=(
-                    f"Falta la columna '{col}' en df_res.\n"
-                    f"Si la renombraste, actualiza también lib_excel_export.py "
-                    f"y este test."
-                )
-            )
-
-    def test_r_min_newell_es_float(self):
-        """
-        r_min_newell debe ser un float — es el valor ya calculado que se pasa
-        a _sheet_parametros en lugar del timeline completo.
-        El cálculo ocurre en main.py, no dentro del Excel.
-        """
-        r_min = _hacer_r_min_newell()
-        self.assertIsInstance(r_min, float,
-                              msg="r_min_newell debe ser un float.")
-
-    def test_flight_status_valores_validos(self):
-        """
-        Los valores de flight_status deben ser exactamente las 4 constantes
-        definidas en config.py. Si alguien cambia una constante FS_* sin
-        actualizar el código que filtra por ella, los filtros dejan de funcionar.
-        """
-        from config import FS_CONTROLLED, FS_EXEMPT_INTERNATIONAL, FS_EXEMPT_FLYING, FS_EXEMPT_RADIUS
-        valores_validos = {
-            FS_CONTROLLED,
-            FS_EXEMPT_INTERNATIONAL,
-            FS_EXEMPT_FLYING,
-            FS_EXEMPT_RADIUS,
-        }
-        valores_reales = set(self.df_res['flight_status'].unique())
-        for valor in valores_reales:
-            self.assertIn(
-                valor, valores_validos,
-                msg=(
-                    f"Valor inesperado en flight_status: '{valor}'.\n"
-                    f"Valores permitidos: {valores_validos}"
-                )
-            )
-
-
-# =============================================================================
-# TEST CLASE 3 — Generación completa del Excel
-#
-# Bug que previene: TypeError por argumentos incorrectos, pestañas que
-#                   no se crean, o errores silenciosos en la exportación.
-# Causa original:  Pasar df_res donde se esperaba timeline, o no actualizar
-#                  la firma de exportar_auditoria_excel al añadir argumentos.
-# =============================================================================
-
-class TestGeneracionExcelCompleto(unittest.TestCase):
-    """
-    Test de integración: genera el Excel completo con datos sintéticos
-    y verifica que todas las pestañas existen y tienen contenido.
-    """
-
-    def setUp(self):
-        """Prepara datos y carpeta temporal antes de cada test."""
-        self.directorio_temp = tempfile.mkdtemp()
-        self.path_excel = os.path.join(self.directorio_temp, 'test_auditoria.xlsx')
-
-        self.df_res      = _hacer_df_res_minimo()
-        self.df_slots    = _hacer_df_slots_minimo()
-        self.df_crudos   = _hacer_df_crudos_minimo()
-        self.params      = _hacer_params_minimo()
-        self.r_min_newell = _hacer_r_min_newell()
-        self.h_noreg     = 900
-
-    def tearDown(self):
-        """Limpia la carpeta temporal después de cada test."""
-        shutil.rmtree(self.directorio_temp, ignore_errors=True)
-
-    def test_no_lanza_excepcion(self):
-        """
-        La función principal no debe lanzar ninguna excepción con datos válidos.
-        Si lanza TypeError, probablemente un argumento está en el orden incorrecto
-        o tiene el nombre equivocado.
-        """
-        try:
-            excel.exportar_auditoria_excel(
-                self.df_crudos,
-                self.df_res,
-                self.df_slots,
-                self.params,
-                self.h_noreg,
-                self.r_min_newell,
-                self.path_excel,
-            )
-        except Exception as e:
-            self.fail(
-                f"exportar_auditoria_excel lanzó una excepción inesperada:\n"
-                f"{type(e).__name__}: {e}"
-            )
-
-    def test_archivo_excel_se_crea(self):
-        """El archivo .xlsx debe existir después de llamar a la función."""
-        excel.exportar_auditoria_excel(
-            self.df_crudos, self.df_res, self.df_slots,
-            self.params, self.h_noreg, self.r_min_newell, self.path_excel,
-        )
-        self.assertTrue(
-            os.path.exists(self.path_excel),
-            msg="El archivo Excel no se ha creado en la ruta esperada."
-        )
-
-    def test_todas_las_pestañas_existen(self):
-        """
-        El Excel debe tener exactamente estas pestañas.
-        Si se añade o elimina una pestaña, este test lo detecta.
-        """
-        excel.exportar_auditoria_excel(
-            self.df_crudos, self.df_res, self.df_slots,
-            self.params, self.h_noreg, self.r_min_newell, self.path_excel,
-        )
-
-        from openpyxl import load_workbook
-        wb = load_workbook(self.path_excel)
-
-        pestañas_esperadas = [
-            '0_Parametros_GDP',
-            '1_Datos_Crudos',
-            '2_Regulacion_GDP',
-            '3_Matriz_Slots',
-            '5_KPIs_Comparativa',
-            '6_Analisis_Retrasos',
-            '7_Equidad_RBS',
-        ]
-        for pestaña in pestañas_esperadas:
-            self.assertIn(
-                pestaña, wb.sheetnames,
-                msg=(
-                    f"Falta la pestaña '{pestaña}' en el Excel generado.\n"
-                    f"Pestañas encontradas: {wb.sheetnames}"
-                )
-            )
-
-    def test_pestañas_tienen_contenido(self):
-        """
-        Ninguna pestaña debe estar vacía — todas deben tener al menos
-        una fila de cabecera y una fila de datos.
-        """
-        excel.exportar_auditoria_excel(
-            self.df_crudos, self.df_res, self.df_slots,
-            self.params, self.h_noreg, self.r_min_newell, self.path_excel,
-        )
-
-        from openpyxl import load_workbook
-        wb = load_workbook(self.path_excel)
-
-        for nombre_hoja in wb.sheetnames:
-            ws = wb[nombre_hoja]
-            self.assertGreater(
-                ws.max_row, 1,
-                msg=f"La pestaña '{nombre_hoja}' está vacía o solo tiene cabecera."
-            )
-
-    def test_firma_correcta_de_exportar(self):
-        """
-        Verifica que exportar_auditoria_excel acepta exactamente los
-        argumentos que main.py le pasa, en el orden correcto.
-        Si alguien cambia la firma sin actualizar main.py, este test falla.
-        """
-        import inspect
-        sig = inspect.signature(excel.exportar_auditoria_excel)
-        parametros = list(sig.parameters.keys())
-
-        orden_esperado = [
-            'df_vuelos_crudo', 'df_res', 'df_slots',
-            'params', 'h_noreg', 'r_min_newell', 'path',
-        ]
-        self.assertEqual(
-            parametros, orden_esperado,
-            msg=(
-                f"La firma de exportar_auditoria_excel ha cambiado.\n"
-                f"Esperado: {orden_esperado}\n"
-                f"Actual:   {parametros}\n"
-                f"Actualiza también main.py si cambias el orden de los argumentos."
-            )
-        )
-
-
-# =============================================================================
-# PUNTO DE ENTRADA
-# =============================================================================
-
-if __name__ == '__main__':
-    unittest.main(verbosity=2)
+def test_every_wp5_kpi_is_mapped_to_a_kpa(pipeline):
+    assert 'Other' not in set(pipeline['wp5']['KPA'])
+    assert {etiqueta for etiqueta, _ in FILAS_RESUMEN} <= set(KPA_POR_KPI)
+    assert len(pipeline['wp5'].columns) == 2 + 6                      # KPA, Metric + six methods

@@ -50,7 +50,7 @@ def ejecutar_proyecto_completo() -> None:
     print("\n[WP1] Preparando datos y escenario...")
     print(f"   • Tráfico: {os.path.relpath(PATH_VUELOS_RAW, BASE_DIR)}")
     if os.path.abspath(PATH_VUELOS_RAW) == os.path.abspath(config.SAMPLE_TRAFFIC):
-        print("   ⚠️  Real traffic file not found: running on the SYNTHETIC sample day.")
+        print("   ⚠️  Running on the SYNTHETIC sample day (the real traffic file is not redistributed).")
     params = CFG.to_params_dict()
     h_start_min = params.get('H_START', 0) # Necesario para evaluar retraso irrecuperable
     df_vuelos = prep.preparar_vuelos(PATH_VUELOS_RAW, PATH_FLOTA_RAW)
@@ -164,6 +164,15 @@ def ejecutar_proyecto_completo() -> None:
     df_final.to_csv(PATH_OUTPUT_CSV, index=False)
     print("   ✅ CSV maestro guardado.")
 
+    # Final comparison of the six methods, KPIs related to SESAR KPAs.
+    from lib_comparison import grafica_final, tabla_final
+    df_wp5 = tabla_final(df_tabla_intermodal)
+    path_wp5 = os.path.join(BASE_DIR, 'data/processed/wp5_comparacion_final.csv')
+    df_wp5.to_csv(path_wp5, index=False)
+    grafica_final(resultados_wp4['kpis'], os.path.join(BASE_DIR, 'output', 'figures', 'wp5'))
+    print("\n 📊 WP5 FINAL COMPARISON (KPIs by SESAR KPA):")
+    print(df_wp5.to_string(index=False))
+
     r_min_newell = calcular_retraso_minimo_newell(resultados['timeline'])
     
     # Llamada refactorizada al exportador Multi-Escenario
@@ -178,7 +187,12 @@ def ejecutar_proyecto_completo() -> None:
         r_min_newell=r_min_newell,
         path=PATH_OUTPUT_EXCEL,
         df_res_comprimido=resultados.get('vuelos_comprimidos'),
-        df_intermodal=df_tabla_intermodal
+        df_intermodal=df_tabla_intermodal,
+        tablas_resumen={
+            'WP3_GHP_vs_GDP': comparativa_wp3,
+            'WP4_Intermodal': df_tabla_intermodal,
+            'WP5_Final_by_KPA': df_wp5,
+        },
     )
 
     vis.generar_graficos_fase2(
@@ -194,7 +208,8 @@ def ejecutar_proyecto_completo() -> None:
     print("✨ PROCESO COMPLETO FINALIZADO CON ÉXITO ✨")
     print(f"   📄 CSV maestro:          data/processed/vuelos_finales_gdp.csv")
     print(f"   📊 Excel de auditoría:   data/processed/auditoria_completa.xlsx")
-    print(f"   📈 Dashboard KPIs:       data/processed/wp3_resumen_ejecutivo.csv")
+    print(f"   📈 WP3 summary:          data/processed/wp3_resumen_ejecutivo.csv")
+    print(f"   🏁 WP5 comparison:       data/processed/wp5_comparacion_final.csv")
     print(f"   🚆 Comparativa WP4:      data/processed/wp4_comparativa_intermodal.csv")
     print(f"   🌡️  Matriz sensibilidad: data/processed/sensitivity_grid.csv")
     print("═" * 70 + "\n")

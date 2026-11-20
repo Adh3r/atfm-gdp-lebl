@@ -13,7 +13,7 @@ Status legend: ⏳ pending · ✅ fixed
 | | Issue | Status |
 |---|---|---|
 | R1 | Unpinned dependencies: PuLP ≥ 3 changed its API and the pipeline crashed in WP3. | ✅ versions pinned; PuLP no longer needed (see C2) |
-| R2 | 19 of 47 tests were stale and one test file was never collected. | ⏳ WP1 (24), WP2 (21) and WP3 (17) suites rewritten |
+| R2 | 19 of 47 tests were stale and one test file was never collected. | ✅ 71 tests, all rewritten for pytest; run in CI on the synthetic day |
 
 ## Results
 
@@ -30,6 +30,7 @@ Status legend: ⏳ pending · ✅ fixed
 | C9 | **Wrong cost-of-delay tables.** The code used Tables 11 and 12 of Cook & Tanner's *The cost of passenger delay to airlines in Europe* (2015), labelled "Table 12: total, without reactionary" and "Table 11: hard only, with reactionary". Those tables are **passenger costs only** (Table 11: passenger hard costs; Table 12: passenger hard + soft). Neither includes reactionary delay, fuel, crew or maintenance. Switching to "hard only" at 15 min even made the cost *drop* from 14 to 15 min of delay. The method the report describes — primary cost below the 15-min OTP threshold, full cost with reactionary delay above it — is in the main reference (*European airline delay cost reference values* v4.1, 2015): Tables 22/26 (at gate) and 24/28 (en route), base scenario. These tables are now used: at gate for ground delay, en route for air delay. The cost grows linearly beyond the last breakpoint (300 min). The passenger scaling keeps the Annex 3 base loads, now cited correctly. | Every cost figure. GDP (RBS) 4.33 M€ → 11.83 M€ for the affected flights. The report's "reactionary cost >99 %" came from the mislabelled table. | ✅ |
 | C10 | With a correct, non-linear cost and no limit, the optimiser loads delays of up to 10–11 h on a few flights: beyond about 120 min the reactionary component of the Cook & Tanner cost saturates, so each extra minute is cheaper. The statement asks to avoid very high ground delays. A cap of 300 min (the last breakpoint of the cost tables, so every delay stays inside the data) is applied to controlled flights in the GHP (`MAX_GROUND_DELAY_MIN`). A cap below the RBS maximum (224 min) is infeasible, because ETA order already minimises the maximum delay. | Uncapped: GHP cost 8.78 M€ (−25.8 %) with a maximum of 603 min. Capped at 300: 9.19 M€ (−22.3 %). Capped at 240: 9.49 M€ (−19.8 %). | ✅ |
 | C11 | **Figure with invented curves.** The WP4 "queue evolution" figure (report Figure 8, "Earlier HNoReg due to HSR substitution") did not plot simulation output. It drew hand-made curves (demand 0.65·t − 0.00018·t², capacity 0.5·t) scaled so that they ended at the two computed HNoReg values. The figure now plots the real Newell queues of the baseline and reduced demand. The two other WP4 figures were rebuilt from the simulation results instead of re-reading the CSVs by their Spanish row labels. | Report Figure 8 | ✅ |
+| C12 | The penalty-and-compression results (WP2) were computed but never exported: the Excel sheet built in March was dropped in a May refactor, which left `df_res_comprimido` unused. In the original sheet, "minutes saved" compared against a label that was never assigned, so it was always 0. The sheet is restored, with rows matched by index (two callsigns are duplicated in the traffic file). | Compression: 12 flights cancelled (6 Vueling), 222 moved earlier, 4,100 min saved | ✅ |
 
 C4 quotes the figures obtained with the original distance model.
 
@@ -108,3 +109,17 @@ between airlines and of a longer maximum delay.
 The system saves about 68 t of CO₂: 66.4 t direct (104.1 t of flights replaced
 by 37.7 t of rail) and about 1.7 t less delay CO₂. Door to door, the train beats
 the delayed flight only on Madrid (246 min vs 261 min on average).
+
+### WP5
+
+- Final comparison of the six methods (GDP, GHP emissions and GHP cost, each
+  with and without rail substitution). Every KPI is mapped to a SESAR KPA
+  (capacity, operational efficiency, predictability, flexibility, safety,
+  environment, cost effectiveness, access and equity), as the WP5 statement
+  asks: `data/processed/wp5_comparacion_final.csv` and sheet
+  `WP5_Final_by_KPA` of the workbook.
+- Excel workbook: dashboard, WP3/WP4/WP5 summaries, flight-by-flight audit of
+  the six scenarios (with CTD/CTA), compression, parameters and slots.
+- Figures use the course terminology (Hstart, Hend, HNoReg, AAR/PAAR, file
+  time). The README figures are rebuilt with `tools/make_readme_figures.py`.
+- GitHub Actions runs the tests and the full pipeline on the synthetic day.

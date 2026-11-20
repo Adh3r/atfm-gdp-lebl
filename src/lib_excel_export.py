@@ -4,16 +4,12 @@
 # =============================================================================
 
 import os
+
+import numpy as np
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-
-# Importes de configuración (asegúrate de que coincidan con tus rutas)
-try:
-    from config import COST_AIR_MIN, COST_GND_MIN, FS_CONTROLLED
-except ImportError:
-    pass # Fallback por si ejecutas de forma aislada
 
 # Colores Corporativos para el Reporte
 COLOR_CABECERA_AZUL = "FF1F4E79"  # Azul Oscuro (Profesional)
@@ -123,83 +119,119 @@ def exportar_auditoria_excel(
     r_min_newell: float,
     path: str,
     df_res_comprimido: pd.DataFrame = None,
-    df_intermodal: pd.DataFrame = None, 
+    df_intermodal: pd.DataFrame = None,
+    tablas_resumen: dict | None = None,
 ) -> None:
     """
-    Construye el Excel consolidado para el reporte final.
-    Organiza los escenarios GHP, Intermodales y Base de forma comparativa.
+    Consolidated Excel workbook for the report:
+
+        00_Dashboard_KPIs        one row of KPIs per scenario
+        Summary sheets           WP3 / WP4 / WP5 tables (tablas_resumen)
+        Audit_<scenario>         flight-by-flight allocation of each scenario
+        WP2_Compression          penalty-and-compression, flight by flight
+        Config_Escenario         regulation parameters, HNoReg, Newell bound
+        Config_Slots             slot list
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     wb = Workbook()
-    if "Sheet" in wb.sheetnames: del wb["Sheet"]
+    if "Sheet" in wb.sheetnames:
+        del wb["Sheet"]
 
-    # 1. EL DASHBOARD (Pestaña Reina para el Reporte)
-    # -------------------------------------------------------------------------
+    # 1. Dashboard
     ws_dash = wb.create_sheet("00_Dashboard_KPIs", 0)
     _escribir_dataframe_con_formato(ws_dash, df_dashboard, COLOR_CABECERA_AZUL)
     _autoajustar_columnas(ws_dash)
-    ws_dash.freeze_panes = "B2" # Congelar primera columna (Nombres de Escenario)
+    ws_dash.freeze_panes = "B2"
 
-    # 2. ESCENARIOS DETALLADOS (Auditoría Vuelo a Vuelo)
-    # -------------------------------------------------------------------------
+    # 2. Summary tables (WP3, WP4, WP5)
+    for nombre, tabla in (tablas_resumen or {}).items():
+        if tabla is None or tabla.empty:
+            continue
+        ws = wb.create_sheet(nombre[:31])
+        _escribir_dataframe_con_formato(ws, tabla, COLOR_CABECERA_AZUL)
+        _autoajustar_columnas(ws)
+        ws.freeze_panes = "B2"
+
+    # 3. Flight-by-flight audit of every scenario
+    cols_audit = [
+        'ARCID', 'airline', 'ADEP', 'ATYP', 'distancia_km', 'flight_status',
+        'minutes_etd', 'minutes_eta', 'CTD', 'CTA',
+        'total_delay', 'air_delay', 'ground_delay', 'co2_kg_vuelo',
+    ]
     for nombre, df in escenarios_dict.items():
-        if df is None or df.empty: continue
-        
-        color_tab = "1F4E79" # Azul
-        if "GHP" in nombre: color_tab = "375623" # Verde
-        if "Intermodal" in nombre: color_tab = "7030A0" # Púrpura
-        
-        ws_name = f"Audit_{nombre}"[:31] # Límite Excel 31 chars
-        ws = wb.create_sheet(ws_name)
+        if df is None or df.empty:
+            continue
+        color_tab = "1F4E79"
+        if "GHP" in nombre:
+            color_tab = "375623"
+        if "Intermodal" in nombre:
+            color_tab = "7030A0"
+        ws = wb.create_sheet(f"Audit_{nombre}"[:31])
         ws.sheet_properties.tabColor = color_tab
-        
-        # Selección de columnas críticas para la auditoría (añadido co2_kg_vuelo si existe)
-        cols_audit = [
-            'ARCID','airline', 'Opr', 'ADEP','ATYP','distancia_km','minutes_eta',
-            'assigned_slot','total_delay','air_delay','ground_delay','co2_kg_vuelo','flight_status'
-        ]
-        cols_finales = [c for c in cols_audit if c in df.columns]
-        df_audit = df[cols_finales].sort_values('minutes_eta').reset_index(drop=True)
-        
-        _escribir_dataframe_con_formato(ws, df_audit, color_header="FF" + color_tab)
+        df_audit = df[[c for c in cols_audit if c in df.columns]]
+        _escribir_dataframe_con_formato(
+            ws, df_audit.sort_values('minutes_eta').reset_index(drop=True), color_header="FF" + color_tab)
         _autoajustar_columnas(ws)
         ws.freeze_panes = "A2"
 
-    # 3. COMPARATIVA INTERMODAL (WP4)
-    # -------------------------------------------------------------------------
-    if df_intermodal is not None and not df_intermodal.empty:
-        ws_int = wb.create_sheet("WP4_Comparativa_Intermodal")
+    # 4. WP2 penalty and compression
+    base = next(iter(escenarios_dict.values()), None)
+    if df_res_comprimido is not None and base is not None:
+        _sheet_compresion(wb, base, df_res_comprimido)
+
+    # 5. WP4 comparison (kept for backwards compatibility if not in the summaries)
+    if df_intermodal is not None and not df_intermodal.empty and 'WP4_Intermodal' not in (tablas_resumen or {}):
+        ws_int = wb.create_sheet("WP4_Intermodal")
         ws_int.sheet_properties.tabColor = "7030A0"
         _escribir_dataframe_con_formato(ws_int, df_intermodal, COLOR_CABECERA_INT)
         _autoajustar_columnas(ws_int)
 
-    # 4. PESTAÑAS DE INFRAESTRUCTURA Y PARÁMETROS (Soporte Técnico)
-    # -------------------------------------------------------------------------
+    # 6. Parameters and slots
     _sheet_parametros(wb, params, h_noreg, r_min_newell)
     _sheet_matriz_slots(wb, df_slots)
-    
-    # 5. GUARDADO FINAL
-    # -------------------------------------------------------------------------
+
     wb.save(path)
-    print(f"✅ Excel de reporte generado y formateado: {os.path.basename(path)}")
+    print(f"✅ Excel workbook written: {os.path.basename(path)}")
 
 # =============================================================================
 # FUNCIONES DE APOYO
 # =============================================================================
 
+def tabla_compresion(df_res: pd.DataFrame, df_res_comprimido: pd.DataFrame) -> pd.DataFrame:
+    """
+    Flight-by-flight effect of penalty and compression (WP2), as in the
+    original sheet by Dènia Cabrera. Rows are matched by index (callsigns are
+    not unique in the traffic file).
+    """
+    orig = df_res[['ARCID', 'airline', 'flight_status', 'minutes_eta', 'CTA', 'total_delay']].rename(
+        columns={'minutes_eta': 'ETA', 'CTA': 'CTA_before', 'total_delay': 'delay_before'})
+    comp = df_res_comprimido[['assigned_slot', 'total_delay']].rename(
+        columns={'assigned_slot': 'CTA_after', 'total_delay': 'delay_after'})
+    df = orig.join(comp, how='left')
+    df['status'] = np.select(
+        [df['CTA_after'].isna(), df['CTA_after'] < df['CTA_before']],
+        ['Cancelled (penalty)', 'Moved earlier (compression)'],
+        default='No change',
+    )
+    df['minutes_saved'] = np.where(df['status'] == 'Moved earlier (compression)',
+                                   df['delay_before'] - df['delay_after'], 0.0)
+    return df.sort_values('ETA').reset_index(drop=True)
+
+
+def _sheet_compresion(wb, df_res, df_res_comprimido):
+    ws = wb.create_sheet('WP2_Compression')
+    _escribir_dataframe_con_formato(ws, tabla_compresion(df_res, df_res_comprimido))
+    _autoajustar_columnas(ws)
+    ws.freeze_panes = "A2"
+
+
 def _sheet_parametros(wb, params, h_noreg, r_min_newell):
     ws = wb.create_sheet("Config_Escenario")
-    
-    # Convertimos los params a un df sencillo para usar nuestra función de formato
-    datos = [["Parámetro", "Valor"]]
-    for k, v in params.items():
-        datos.append([k, str(v)])
-    datos.append(["h_noreg", str(h_noreg)])
-    datos.append(["r_min_newell", str(r_min_newell)])
-    
-    df_params = pd.DataFrame(datos[1:], columns=datos[0])
-    _escribir_dataframe_con_formato(ws, df_params, COLOR_CABECERA_AZUL)
+    datos = [[k, str(v)] for k, v in params.items()]
+    datos += [["HNoReg", str(h_noreg)], ["Newell minimum delay (min)", str(round(r_min_newell, 1))]]
+    _escribir_dataframe_con_formato(ws, pd.DataFrame(datos, columns=["Parameter", "Value"]), COLOR_CABECERA_AZUL)
     _autoajustar_columnas(ws)
+
 
 def _sheet_matriz_slots(wb, df_slots):
     ws = wb.create_sheet("Config_Slots")

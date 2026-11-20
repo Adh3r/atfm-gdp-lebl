@@ -182,7 +182,7 @@ def plot_newell(
              label='Cumulative Demand (ETA)', color='cornflowerblue', linewidth=2)
 
     plt.plot(tiempo_en_horas, timeline['capacity_accum'],
-             '--', label='Cumulative Service (RTA)', color='hotpink', linewidth=2)
+             '--', label='Cumulative capacity (AAR / PAAR)', color='hotpink', linewidth=2)
 
     # fill_between() colorea el área entre las dos curvas
     plt.fill_between(
@@ -193,9 +193,9 @@ def plot_newell(
     )
 
     # Líneas verticales para los tres hitos del GDP
-    plt.axvline(x=params['H_START'] / 60, color='palevioletred',    linestyle=':',  label='Regulation Start')
-    plt.axvline(x=params['H_END']   / 60, color='mediumaquamarine', linestyle=':',  label='Regulation End')
-    plt.axvline(x=h_noreg           / 60, color='midnightblue',     linestyle='-.', label='H_NOREG (queue cleared)')
+    plt.axvline(x=params['H_START'] / 60, color='palevioletred',    linestyle=':',  label='Hstart (reduced capacity starts)')
+    plt.axvline(x=params['H_END']   / 60, color='mediumaquamarine', linestyle=':',  label='Hend (reduced capacity ends)')
+    plt.axvline(x=h_noreg           / 60, color='midnightblue',     linestyle='-.', label='HNoReg (queue dissolved)')
 
     plt.title("Aggregated Demand Curve", fontsize=20, fontweight='bold')
     plt.xlabel("UTC Time (hours)", fontsize=18)
@@ -297,7 +297,7 @@ def plot_impacto_economico(df_res: pd.DataFrame, ruta_salida: str) -> None:
     )
 
     plt.title("GDP Cost Savings vs. Do-Nothing Scenario", fontsize=14, fontweight='bold')
-    plt.ylabel("Estimated Total Cost (EUR)", fontsize=12)
+    plt.ylabel("Cost of delay, flat per-minute rates (EUR)", fontsize=12)
 
     valor_maximo = max(valores)
     plt.ylim(0, valor_maximo * 1.30)
