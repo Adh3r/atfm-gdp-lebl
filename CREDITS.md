@@ -7,8 +7,8 @@ MGTA course at EETAC – Universitat Politècnica de Catalunya (spring 2026).
 
 | Author | GitHub | Main contributions |
 |---|---|---|
-| **Dènia Cabrera** | [@deniacabrera](https://github.com/deniacabrera) | WP1 data processing and Excel audit; WP2 RBS slot filling, GDP candidate filtering, penalty-and-compression algorithm; WP3 unit-cost validation of the GHP; WP4 train-emission data |
-| **Adam Ruiz Herrero** | [@Adh3r](https://github.com/Adh3r) | WP1 aggregate demand (Newell); WP2 debugging and sensitivity analysis; WP3 ground-CO₂ model (FEGP + Spanish grid); WP4 intermodal model; WP5 unified metrics engine and project integration |
+| **Dènia Cabrera** | [@deniacabrera](https://github.com/deniacabrera) | WP1 data processing and Excel audit; WP2 RBS slot filling, GDP candidate filtering, cancellation and compression algorithm; WP3 unit-cost validation of the GHP; WP4 train-emission data |
+| **Adam Ruiz Herrero** | [@Adh3r](https://github.com/Adh3r) | WP1 aggregate demand (Newell); WP2 debugging and sensitivity analysis; WP3 ground-CO₂ model (FEGP + Spanish grid, replaced in the revision: see C17); WP4 intermodal model; WP5 unified metrics engine and project integration |
 | **Josep Ponz** | [@PakytoPaez](https://github.com/PakytoPaez) | WP2 slot generation; WP3 GHP scenarios, Cook & Tanner cost model, fairness and KPI comparison, figures |
 
 The full development history (March–May 2026) is preserved in this

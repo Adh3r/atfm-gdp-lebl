@@ -6,7 +6,23 @@ fairness figure. A review then found the issues below. They are corrected in thi
 repository, and each correction is listed with its effect on the published
 numbers.
 
-Status legend: ⏳ pending · ✅ fixed
+**Summary.** 24 corrections to the results (C1–C24) and two reproducibility
+fixes (R1–R2). The ones that change the conclusions most are:
+
+- the "GDP" baseline of the report was a solver validation run, not the
+  Ration-By-Schedule allocation (C1);
+- the nominal arrival capacity was the maximum ever observed (44/h) instead of
+  the declared capacity (38/h) (C21);
+- the cost of delay used passenger-only tables, a linear proxy in the
+  optimiser and no aircraft rotations (C2, C9, C13);
+- ground-delay CO₂ ignored the course method (fuel at the gate) (C5, C17);
+- a WP4 figure was drawn from invented curves (C11).
+
+The submitted report's qualitative conclusions hold: the cost-optimal GHP is
+cheaper and less fair than Ration-By-Schedule, and rail substitution shortens
+the regulation and cuts CO₂.
+
+✅ = fixed in this repository.
 
 ## Reproducibility
 

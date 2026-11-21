@@ -4,14 +4,25 @@
 
 **Air traffic flow management simulator for Barcelona–El Prat (LEBL).**
 It models a severe weather-related capacity drop and compares the ways of
-absorbing the resulting arrival delay: a Ground Delay Program allocated by Ration-By-Schedule,
-Ground Holding optimisation for cost or for CO₂, and replacing short-haul
-flights with high-speed rail.
+absorbing the resulting arrival delay: a Ground Delay Program allocated by
+Ration-By-Schedule, Ground Holding optimisation for cost or for CO₂, and
+replacing short-haul flights with high-speed rail.
 
 Built on one real traffic day (10 August 2025, 550 arrivals). The arrival
 capacity is cut from 38 to 20 arrivals/h between 06:00 and 13:00 UTC. 38/h is
 the declared arrival capacity of El Prat's main runway configuration and its
 peak service rate in EUROCONTROL's airport capacity study.
+
+**Highlights**
+
+- Exact Ground Holding optimisation: the integer programme is solved as a
+  linear assignment problem, so any non-linear cost of delay can be used.
+- Cost of delay with reactionary delay computed from each aircraft's real
+  rotation (registration mark), on the EUROCONTROL reference cost tables.
+- Every parameter traced to a primary source: EUROCONTROL capacity study and
+  Standard Inputs, ICAO Doc 9889, IATA, EU regulation (see the assumptions
+  below and [`CREDITS.md`](CREDITS.md)).
+- Python (pandas, NumPy, SciPy), 90 tests, ruff, CI on every push.
 
 > The project was delivered as coursework in May 2026 and revised in November
 > 2026. The revision fixed several modelling errors; [`CHANGES.md`](CHANGES.md)
@@ -36,7 +47,7 @@ same 45,474 minutes of delay. What changes is **who** absorbs it (costs in
 | Cost of delay | 13.66 M€ | 15.80 M€ | 10.55 M€ | 10.70 M€ | **8.35 M€** |
 | Delay passed on to next rotations | 25,000 min | 29,600 min | 23,100 min | 19,600 min | **18,100 min** |
 | Delay CO₂ | 94 t | **86 t** | 91 t | 81 t | 80 t |
-| Max delay | **225 min** | 300 min | 300 min | 213 min | 300 min |
+| Max delay | **225 min** | 300 min (cap) | 300 min (cap) | 213 min | 300 min (cap) |
 | Airline fairness (RSD of mean delays) | 24 % | 50 % | 46 % | **16 %** | 22 % |
 | HNoReg | 21:54 | 21:54 | 21:54 | **20:34** | 20:34 |
 
@@ -67,8 +78,9 @@ same 45,474 minutes of delay. What changes is **who** absorbs it (costs in
 The cost of delaying a flight comes from the Cook & Tanner (2015) tactical cost
 tables, the reference of the EUROCONTROL Standard Inputs, in 2022 prices as in
 their latest edition. Only the passenger component is scaled by the flight's
-real passengers (seats × the August 2025 European load factor). A late arrival also delays the next
-departure of the same aircraft when the delay exceeds the turnaround buffer.
+real passengers (seats × the August 2025 European load factor). A late arrival
+also delays the next departure of the same aircraft when the delay exceeds the
+turnaround buffer.
 That is reactionary delay, IATA code 93. The buffer is the scheduled ground
 time before the next departure (found through the registration mark) minus a
 minimum turnaround time. The cost is therefore:
@@ -127,7 +139,8 @@ the published results. With access to the original file, place it at
 same columns.
 
 ```bash
-python -m pytest test -q        # from the repository root
+python -m pytest -q             # tests, from the repository root
+ruff check . && ruff format --check .   # lint (pip install ruff)
 ```
 
 ## Repository layout
@@ -135,9 +148,11 @@ python -m pytest test -q        # from the repository root
 ```
 data/raw/         fleet and airport tables (real traffic file goes here, git-ignored)
 data/sample/      synthetic traffic day
-tools/            scripts that rebuild the airport table and the synthetic day
+docs/figures/     figures used in this README
+tools/            scripts that rebuild the airport table, the synthetic day and the figures
 src/              simulator (main.py is the entry point)
 test/             pytest suite
+pyproject.toml    ruff and pytest configuration
 data/processed/   generated tables      (git-ignored)
 output/figures/   generated figures     (git-ignored)
 ```
