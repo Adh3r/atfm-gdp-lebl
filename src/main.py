@@ -17,6 +17,7 @@ import lib_intermodal    as inter
 import lib_sensitivity   as sens
 import lib_visualization as vis
 from config import CFG, FS_CONTROLLED
+from cost_model import ground_co2_kg_per_min
 from lib_gdp_core import newell_minimum_delay
 from lib_ghp_solver import MAX_AIR_DELAY_MIN, run_ghp, cost_model_sensitivity
 from lib_metrics import evaluate_scenario, summary_table
@@ -79,7 +80,10 @@ def main() -> None:
     # air/ground CO2, delayed flights, OTP) and the cancellation exercise.
     wp2_summary = summary_table({'GDP (RBS)': evaluate_scenario(df_rbs, 'GDP (RBS)', h_start_min)},
                                 extras={'HNoReg (min UTC)': {'GDP (RBS)': h_noreg_base},
-                                        'Total delay from the Newell curves (min)': {'GDP (RBS)': round(newell_min, 1)}})
+                                        'Total delay from the Newell curves (min)': {'GDP (RBS)': round(newell_min, 1)},
+                                        'Ground delay CO2, APU never on / on 50 % (kg)': {'GDP (RBS)': '{:,.0f} / {:,.0f}'.format(
+                                            *((ground_co2_kg_per_min(df_rbs['size_seats_avg'], sc) * df_rbs['ground_delay']).sum()
+                                              for sc in ('low', 'high')))}})
     print(wp2_summary.to_string(index=False))
     wp2_cancellations = pd.DataFrame(
         [(k, round(v, 1) if isinstance(v, float) else v) for k, v in results['compression_summary'].items()],

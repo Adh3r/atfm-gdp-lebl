@@ -23,18 +23,34 @@ import numpy as np
 import pandas as pd
 
 # CO2 of ground delay (WP2 statement: "look for references for fuel
-# consumption at gate ... one value for each aircraft category", 1 kg of fuel
-# = 3.16 kg of CO2). A flight held at its origin gate keeps its auxiliary
-# power unit (APU) running for air conditioning and power. APU fuel flow in
-# normal running (maximum environmental control system load) by seat group:
-# ICAO Doc 9889, Airport Air Quality Manual, 2nd ed., Table 3-A1-6.
-# Where the table separates older and newer types, the newer value is used.
+# consumption at gate ... one value for each aircraft category"; 1 kg of fuel
+# = 3.16 kg of CO2).
+#
+# A flight held at its origin stand burns fuel only while its auxiliary power
+# unit (APU) runs; the rest of the time it is on the stand's ground power.
+# - EU airports of the TEN-T network must supply electricity at every contact
+#   stand since 31 Dec 2024 and at every remote stand by 31 Dec 2029
+#   (Regulation (EU) 2023/1804, AFIR, Art. 12), but airlines are not obliged
+#   to use it, so APU use does not drop to zero.
+# - Standard practice for the cost of delay in Europe (Cook & Tanner 2015,
+#   the EUROCONTROL reference used for the cost model) charges at-gate APU
+#   fuel for about 25 % of the time in the base scenario, none in the low
+#   scenario and about 50 % in the high scenario. The same shares are used
+#   here (base for every result, low/high as a sensitivity range).
+# - Emissions accounting (EU ETS monitoring, Implementing Regulation (EU)
+#   2018/2066, Art. 52) counts the APU fuel of a flight; the ground-power
+#   electricity belongs to the airport's own footprint, so it is not added.
+#
+# APU fuel flow in normal running (maximum environmental control system load)
+# by seat group: ICAO Doc 9889, Airport Air Quality Manual, 2nd ed., Table
+# 3-A1-6 (newer-type values where the table separates older and newer types).
 APU_FUEL_KG_PER_H = (
     (100, 101.0),           # business and regional jets (seats < 100)
     (200, 110.0),           # 100 <= seats < 200, newer types
     (300, 164.0),           # 200 <= seats < 300
     (float('inf'), 238.0),  # seats >= 300, newer types
 )
+APU_TIME_SHARE = {'low': 0.0, 'base': 0.25, 'high': 0.50}
 CO2_PER_KG_FUEL = 3.16      # IATA Carbon Offset Programme (statement)
 DEFAULT_SEATS = 180
 
@@ -47,9 +63,9 @@ def apu_fuel_kg_per_h(seats) -> np.ndarray:
     return flows[np.searchsorted(limits, s, side='right')]
 
 
-def ground_co2_kg_per_min(seats) -> np.ndarray:
-    """kg of CO2 per minute of ground delay (APU at the origin gate)."""
-    return apu_fuel_kg_per_h(seats) / 60.0 * CO2_PER_KG_FUEL
+def ground_co2_kg_per_min(seats, scenario: str = 'base') -> np.ndarray:
+    """kg of CO2 per minute of ground delay: APU fuel flow x APU time share x 3.16."""
+    return apu_fuel_kg_per_h(seats) / 60.0 * APU_TIME_SHARE[scenario] * CO2_PER_KG_FUEL
 
 
 # On-time performance threshold: a flight is on time when its delay is below

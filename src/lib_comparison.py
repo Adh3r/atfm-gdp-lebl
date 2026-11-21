@@ -29,6 +29,7 @@ KPI_TO_KPA = {
     'RSD of ground delay, controlled flights (%)':      'Predictability',
     'Air delay CO2 (kg)':                               'Environment',
     'Ground delay CO2 (kg)':                            'Environment',
+    'Ground delay CO2, APU never on / on 50 % (kg)':    'Environment',
     'Unrecoverable delay (min)':                        'Flexibility',
     'Reactionary delay passed to next rotations (min)': 'Predictability',
     'Flights whose delay propagates':                   'Predictability',

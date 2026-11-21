@@ -30,7 +30,7 @@ same 35,680 minutes of delay. What changes is **who** absorbs it:
 |---|---|---|---|---|---|
 | Cost of delay | 8.46 M€ | 9.77 M€ | 6.62 M€ | 6.91 M€ | **5.49 M€** |
 | Delay passed on to next rotations | 18,900 min | 21,700 min | 18,000 min | 15,700 min | **15,100 min** |
-| Delay CO₂ | 249 t | **224 t** | 241 t | 215 t | 208 t |
+| Delay CO₂ | 77 t | **70 t** | 74 t | 68 t | 66 t |
 | Max delay | **224 min** | 300 min | 300 min | 213 min | 300 min |
 | Airline fairness (RSD of mean delays) | 27 % | 86 % | 41 % | **14 %** | 28 % |
 | HNoReg | 19:14 | 19:14 | 19:14 | **18:09** | 18:09 |
@@ -42,14 +42,14 @@ same 35,680 minutes of delay. What changes is **who** absorbs it:
   holding first the aircraft whose next departure has slack, which halves the
   reactionary cost. The price is fairness: the optimiser moves delay onto the
   airlines whose flights are cheaper to delay, and up to the 300-min cap on
-  single flights. Minimising CO₂ instead cuts delay CO₂ by 10 % by holding
+  single flights. Minimising CO₂ instead cuts delay CO₂ by 8 % by holding
   the aircraft with the smallest APUs longest, but it costs 16 % *more* than
   RBS and is the least fair allocation: it ignores rotations and airlines.
   Cost and CO₂ are conflicting objectives.
 - **Rail.** 14 regulated flights (Madrid, Alicante, Marseille) have a direct
   high-speed-rail alternative. Replacing them ends the regulation 65 minutes
-  earlier, removes 15 % of the delay and saves about 101 t of CO₂: 66 t
-  directly (flights replaced by rail) and 35 t of delay CO₂. Door to door, the train only beats
+  earlier, removes 15 % of the delay and saves about 75 t of CO₂: 66 t
+  directly (flights replaced by rail) and 9 t of delay CO₂. Door to door, the train only beats
   the *delayed* flight on Madrid.
 
 ![Fairness by airline](docs/figures/wp3_fairness_by_airline.png)
@@ -91,7 +91,7 @@ instances, runs in about 35 s.
 |---|---|---|
 | WP1 — Data | `lib_data_prep.py` | Filter LEBL arrivals, join fleet data (RECAT, seats), great-circle distance and baseline CO₂ ([Montlaur et al., 2025](https://doi.org/10.3390/app15179688)), scheduled turnaround of each aircraft (registration mark) |
 | WP2 — GDP | `lib_gdp_core.py`, `lib_compression.py`, `lib_sensitivity.py` | Newell cumulative curves and H<sub>NoReg</sub>; exemption rules (non-ECAC, flying or ready to depart at H<sub>file</sub>, outside radius); RBS slot allocation; air/ground delay split; unrecoverable delay; cancellations by one airline, substitution and compression with airline slot ownership; radius × file-time sensitivity heatmaps |
-| WP3 — GHP | `lib_ghp_solver.py`, `cost_model.py` | Exact slot assignment minimising delay CO₂ (APU fuel at the gate, ICAO Doc 9889, vs. airborne burn) or delay cost (Cook & Tanner 2015 primary cost + reactionary cost of the delay passed on to the next rotation, scaled by real passengers); cost-model sensitivity; airline fairness |
+| WP3 — GHP | `lib_ghp_solver.py`, `cost_model.py` | Exact slot assignment minimising delay CO₂ (APU fuel at the gate: ICAO Doc 9889 flows, APU on 25 % of the time as in Cook & Tanner, vs. airborne burn) or delay cost (Cook & Tanner 2015 primary cost + reactionary cost of the delay passed on to the next rotation, scaled by real passengers); cost-model sensitivity; airline fairness |
 | WP4 — Intermodality | `lib_intermodal.py`, `lib_wp4_figures.py` | Door-to-door time and CO₂ for regulated flights with a high-speed-rail alternative; GDP and GHP re-run without them |
 | WP5 — Comparison | `lib_metrics.py`, `lib_comparison.py`, `lib_excel_export.py` | One metrics engine for every scenario; final table with KPIs mapped to SESAR KPAs; multi-sheet Excel audit |
 

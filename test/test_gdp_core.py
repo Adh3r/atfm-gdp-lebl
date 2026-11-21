@@ -181,11 +181,13 @@ def test_unrecoverable_delay_cases():
 
 def test_ground_co2_uses_apu_fuel_at_the_gate():
     # ICAO Doc 9889 Table 3-A1-6, normal running: 110 kg/h for 100-199 seats;
-    # 1 kg of fuel = 3.16 kg of CO2 (statement).
-    apu = 110 / 60 * 3.16
+    # APU on 25 % of the time (Cook & Tanner base); 1 kg fuel = 3.16 kg CO2.
+    apu = 110 / 60 * 0.25 * 3.16
     assert cost_model.ground_co2_kg_per_min([180])[0] == pytest.approx(apu)
     assert cost_model.ground_co2_kg_per_min([80, 250, 400]).tolist() == pytest.approx(
-        [101 / 60 * 3.16, 164 / 60 * 3.16, 238 / 60 * 3.16])
+        [f / 60 * 0.25 * 3.16 for f in (101, 164, 238)])
+    assert cost_model.ground_co2_kg_per_min([180], 'low')[0] == 0
+    assert cost_model.ground_co2_kg_per_min([180], 'high')[0] == pytest.approx(2 * apu)
     df = pd.DataFrame({
         'total_delay': [30.0, 10.0], 'air_delay': [0.0, 10.0], 'ground_delay': [30.0, 0.0],
         'flight_co2_kg': [6000.0, 9000.0], 'block_time_min': [60.0, 90.0],
