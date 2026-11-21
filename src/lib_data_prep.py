@@ -37,6 +37,7 @@ GENERAL_AVIATION = 'GA'
 # TIME CONVERSION
 # =============================================================================
 
+
 def parse_time_to_minutes(time_str) -> float:
     """
     Parse 'HH:MM:SS', 'HH:MM' or a plain number of minutes into minutes
@@ -60,9 +61,11 @@ def parse_time_to_minutes(time_str) -> float:
         return float(parts[0])
     return np.nan
 
+
 # =============================================================================
 # GEOMETRY
 # =============================================================================
+
 
 def great_circle_km(lat1, lon1, lat2, lon2):
     """Haversine great-circle distance in km (works on scalars or arrays)."""
@@ -77,9 +80,11 @@ def load_airports(airports_path: str) -> pd.DataFrame:
     """Load the airport table (icao; name; lat_deg; lon_deg) indexed by ICAO."""
     return pd.read_csv(airports_path, sep=';').set_index('icao')
 
+
 # =============================================================================
 # MAIN FUNCTION: LOAD FLIGHTS
 # =============================================================================
+
 
 def prepare_flights(
     traffic_path: str,
@@ -129,12 +134,10 @@ def prepare_flights(
     # 2. Arrivals to LEBL only (LEBL->LEBL local circuits are dropped). The
     #    departures are kept aside to compute the turnarounds (step 8).
     # -------------------------------------------------------------------------
-    departures_df = df_flights[
-        (df_flights['ADEP'] == AIRPORT) & (df_flights['ADES'] != AIRPORT)
-    ][['RM', 'ETD']].copy()
-    df_flights = df_flights[
-        (df_flights['ADES'] == AIRPORT) & (df_flights['ADEP'] != AIRPORT)
+    departures_df = df_flights[(df_flights['ADEP'] == AIRPORT) & (df_flights['ADES'] != AIRPORT)][
+        ['RM', 'ETD']
     ].copy()
+    df_flights = df_flights[(df_flights['ADES'] == AIRPORT) & (df_flights['ADEP'] != AIRPORT)].copy()
 
     # -------------------------------------------------------------------------
     # 3. Fleet data: RECAT category and average seats per aircraft type
@@ -172,8 +175,10 @@ def prepare_flights(
     origin = airports_df.loc[df_flights['ADEP']]
     destination = airports_df.loc[AIRPORT]
     df_flights['distance_km'] = great_circle_km(
-        origin['lat_deg'].to_numpy(), origin['lon_deg'].to_numpy(),
-        destination['lat_deg'], destination['lon_deg'],
+        origin['lat_deg'].to_numpy(),
+        origin['lon_deg'].to_numpy(),
+        destination['lat_deg'],
+        destination['lon_deg'],
     )
 
     # Block time ETD -> ETA (an arrival after midnight adds 24 h).
@@ -238,6 +243,7 @@ def scheduled_turnaround(arrivals: pd.DataFrame, departures_df: pd.DataFrame) ->
             continue
         tat.loc[idx] = etds[k] - row['minutes_eta']
     return tat
+
 
 # --- DEBUG MODE ---
 if __name__ == "__main__":

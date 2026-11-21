@@ -39,9 +39,14 @@ def main(ourairports_csv: str) -> None:
         if match.empty:
             raise SystemExit(f"No coordinates found in OurAirports for {code}")
         r = match.iloc[0]
-        rows.append({"icao": code, "name": r["name"],
-                     "lat_deg": round(float(r["latitude_deg"]), 6),
-                     "lon_deg": round(float(r["longitude_deg"]), 6)})
+        rows.append(
+            {
+                "icao": code,
+                "name": r["name"],
+                "lat_deg": round(float(r["latitude_deg"]), 6),
+                "lon_deg": round(float(r["longitude_deg"]), 6),
+            }
+        )
 
     pd.DataFrame(rows).to_csv(OUTPUT, sep=";", index=False)
     print(f"Wrote {len(rows)} airports to {OUTPUT.relative_to(ROOT)}")

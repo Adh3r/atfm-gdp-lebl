@@ -27,8 +27,7 @@ N_ARRIVALS = 540
 # Generic arrival profile (relative weight per UTC hour): quiet night, a
 # morning wave and a busy day. Demand in 06-13 UTC must exceed the reduced
 # capacity of 20 arrivals/h so that a GDP is meaningful.
-HOURLY_PROFILE = [2, 1, 1, 1, 2, 8, 30, 34, 36, 34, 32, 30,
-                  32, 33, 34, 33, 32, 30, 28, 26, 22, 16, 10, 5]
+HOURLY_PROFILE = [2, 1, 1, 1, 2, 8, 30, 34, 36, 34, 32, 30, 32, 33, 34, 33, 32, 30, 28, 26, 22, 16, 10, 5]
 
 AIRLINES = ['VLG', 'RYR', 'EZY', 'IBE', 'DLH', 'AFR', 'BAW', 'KLM', 'TAP', 'SWR']
 SHORT_HAUL = ['A320', 'A20N', 'A321', 'A21N', 'B738', 'B38M', 'A319', 'E190']
@@ -41,8 +40,7 @@ LEBL = (41.2971, 2.07846)
 
 def _great_circle_km(lat1, lon1, lat2, lon2):
     p1, p2 = np.radians(lat1), np.radians(lat2)
-    a = (np.sin((p2 - p1) / 2) ** 2
-         + np.cos(p1) * np.cos(p2) * np.sin(np.radians(lon2 - lon1) / 2) ** 2)
+    a = np.sin((p2 - p1) / 2) ** 2 + np.cos(p1) * np.cos(p2) * np.sin(np.radians(lon2 - lon1) / 2) ** 2
     return 2 * 6371.0 * np.arcsin(np.sqrt(a))
 
 
@@ -70,7 +68,7 @@ def main() -> None:
     origins = ap.sample(n=N_ARRIVALS, replace=True, weights=weights, random_state=SEED)
 
     rows = []
-    for i, (t, (_, o)) in enumerate(zip(eta, origins.iterrows())):
+    for i, (t, (_, o)) in enumerate(zip(eta, origins.iterrows(), strict=True)):
         long_haul = o['dist_km'] > 3500
         if long_haul:
             airline, atyp = rng.choice(LONG_HAUL_AIRLINES), rng.choice(LONG_HAUL)
@@ -83,17 +81,19 @@ def main() -> None:
             atyp = rng.choice(SHORT_HAUL)
             arcid = f"{airline}{rng.integers(100, 9999)}"
         block_min = o['dist_km'] / (780 / 60) + 25 + rng.normal(0, 4)
-        rows.append({
-            'ARCID': arcid,
-            'ATYP': atyp,
-            'ADEP': o['icao'],
-            'ADES': 'LEBL',
-            'RM': f"SYN{i:04d}",
-            'ARF': int(rng.choice([340, 360, 380, 400])),
-            'ETD': _hhmmss(t - block_min),
-            'TT': int(rng.integers(8, 20)),
-            'ETA': _hhmmss(t),
-        })
+        rows.append(
+            {
+                'ARCID': arcid,
+                'ATYP': atyp,
+                'ADEP': o['icao'],
+                'ADES': 'LEBL',
+                'RM': f"SYN{i:04d}",
+                'ARF': int(rng.choice([340, 360, 380, 400])),
+                'ETD': _hhmmss(t - block_min),
+                'TT': int(rng.integers(8, 20)),
+                'ETA': _hhmmss(t),
+            }
+        )
 
     # Next departure of the same aircraft (same RM), so that turnarounds and
     # reactionary delay can be computed. A separate generator keeps the
@@ -112,16 +112,27 @@ def main() -> None:
             continue
         block = _minutes(r['ETA']) - _minutes(r['ETD'])
         block = block + 1440 if block <= 0 else block
-        departures.append({
-            'ARCID': r['ARCID'][:3] + str(int(rng_dep.integers(100, 9999))) if r['ARCID'][:3].isalpha() else r['ARCID'],
-            'ATYP': r['ATYP'], 'ADEP': 'LEBL', 'ADES': r['ADEP'], 'RM': r['RM'], 'ARF': r['ARF'],
-            'ETD': _hhmmss(etd), 'TT': int(rng_dep.integers(8, 20)), 'ETA': _hhmmss(etd + block),
-        })
+        departures.append(
+            {
+                'ARCID': r['ARCID'][:3] + str(int(rng_dep.integers(100, 9999)))
+                if r['ARCID'][:3].isalpha()
+                else r['ARCID'],
+                'ATYP': r['ATYP'],
+                'ADEP': 'LEBL',
+                'ADES': r['ADEP'],
+                'RM': r['RM'],
+                'ARF': r['ARF'],
+                'ETD': _hhmmss(etd),
+                'TT': int(rng_dep.integers(8, 20)),
+                'ETA': _hhmmss(etd + block),
+            }
+        )
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows + departures).to_csv(OUTPUT, sep=';', index=False)
-    print(f"Wrote {len(rows)} synthetic arrivals and {len(departures)} departures "
-          f"to {OUTPUT.relative_to(ROOT)}")
+    print(
+        f"Wrote {len(rows)} synthetic arrivals and {len(departures)} departures to {OUTPUT.relative_to(ROOT)}"
+    )
 
 
 if __name__ == '__main__':

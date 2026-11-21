@@ -24,6 +24,7 @@ from lib_gdp_core import gdp_vs_do_nothing
 # SENSITIVITY HEATMAP (WP2)
 # =============================================================================
 
+
 def plot_heatmap(
     matrix: pd.DataFrame,
     title: str,
@@ -55,7 +56,7 @@ def plot_heatmap(
 
     plt.figure(figsize=(12, 7))
     values_list = matrix.values.flatten()
-    vmin = max(values_list.min(), 0.1)    # LogNorm needs positive limits
+    vmin = max(values_list.min(), 0.1)  # LogNorm needs positive limits
     vmax = values_list.max()
 
     cmap = plt.get_cmap("RdYlGn" if best == 'max' else "RdYlGn_r")
@@ -72,19 +73,32 @@ def plot_heatmap(
         linecolor='white',
         annot_kws={"size": 8, "weight": "bold"},
     )
-    ax.set_xticklabels([f"{int(c)} km"  for c in matrix.columns])
+    ax.set_xticklabels([f"{int(c)} km" for c in matrix.columns])
     ax.set_yticklabels([f"{int(i)} min" for i in matrix.index], rotation=0)
     ax.set_xlabel('Radius of exemption R (km)', fontsize=11, fontweight='bold')
     ax.set_ylabel('File time: Hstart − Hfile (min)', fontsize=11, fontweight='bold')
     ax.set_title(title.upper(), fontsize=13, fontweight='bold', pad=20)
 
-    ax.add_patch(plt.Rectangle(
-        (best_col, best_row), 1, 1,
-        fill=False, edgecolor='blue', linewidth=4, zorder=15,
-    ))
+    ax.add_patch(
+        plt.Rectangle(
+            (best_col, best_row),
+            1,
+            1,
+            fill=False,
+            edgecolor='blue',
+            linewidth=4,
+            zorder=15,
+        )
+    )
     ax.text(
-        best_col + 0.5, best_row + 0.9, '★ BEST',
-        ha='center', va='bottom', fontsize=10, color='blue', fontweight='bold',
+        best_col + 0.5,
+        best_row + 0.9,
+        '★ BEST',
+        ha='center',
+        va='bottom',
+        fontsize=10,
+        color='blue',
+        fontweight='bold',
         bbox=dict(facecolor='white', alpha=0.9, edgecolor='blue', boxstyle='round,pad=0.2'),
     )
 
@@ -93,9 +107,11 @@ def plot_heatmap(
     plt.savefig(out_path, format='svg', transparent=True, bbox_inches='tight')
     plt.close()
 
+
 # =============================================================================
 # 1. NEWELL CUMULATIVE CURVES
 # =============================================================================
+
 
 def plot_newell(
     timeline: pd.DataFrame,
@@ -117,16 +133,36 @@ def plot_newell(
     plt.figure(figsize=(12, 6))
     hours = timeline['minute'] / 60
 
-    plt.plot(hours, timeline['demand_accum'],
-             label='Cumulative demand (ETA)', color='cornflowerblue', linewidth=2)
-    plt.plot(hours, timeline['capacity_accum'],
-             '--', label='Cumulative capacity (AAR / PAAR)', color='hotpink', linewidth=2)
-    plt.fill_between(hours, timeline['demand_accum'], timeline['capacity_accum'],
-                     color='plum', alpha=0.5, label='Queue (delay)')
+    plt.plot(
+        hours, timeline['demand_accum'], label='Cumulative demand (ETA)', color='cornflowerblue', linewidth=2
+    )
+    plt.plot(
+        hours,
+        timeline['capacity_accum'],
+        '--',
+        label='Cumulative capacity (AAR / PAAR)',
+        color='hotpink',
+        linewidth=2,
+    )
+    plt.fill_between(
+        hours,
+        timeline['demand_accum'],
+        timeline['capacity_accum'],
+        color='plum',
+        alpha=0.5,
+        label='Queue (delay)',
+    )
 
-    plt.axvline(x=params['H_START'] / 60, color='palevioletred',    linestyle=':',  label='Hstart (reduced capacity starts)')
-    plt.axvline(x=params['H_END']   / 60, color='mediumaquamarine', linestyle=':',  label='Hend (reduced capacity ends)')
-    plt.axvline(x=h_noreg           / 60, color='midnightblue',     linestyle='-.', label='HNoReg (queue dissolved)')
+    plt.axvline(
+        x=params['H_START'] / 60,
+        color='palevioletred',
+        linestyle=':',
+        label='Hstart (reduced capacity starts)',
+    )
+    plt.axvline(
+        x=params['H_END'] / 60, color='mediumaquamarine', linestyle=':', label='Hend (reduced capacity ends)'
+    )
+    plt.axvline(x=h_noreg / 60, color='midnightblue', linestyle='-.', label='HNoReg (queue dissolved)')
 
     plt.title("Newell cumulative curves", fontsize=20, fontweight='bold')
     plt.xlabel("UTC time (hours)", fontsize=18)
@@ -137,9 +173,11 @@ def plot_newell(
     plt.savefig(out_path, format='svg', dpi=300, bbox_inches='tight')
     plt.close()
 
+
 # =============================================================================
 # 2. HOURLY CAPACITY BALANCE
 # =============================================================================
+
 
 def plot_capacity_balance(
     df_flights: pd.DataFrame,
@@ -173,8 +211,18 @@ def plot_capacity_balance(
     capacity = [params['PAAR'] if h_first <= h < h_last else params['AAR'] for h in range(24)]
 
     hours = range(24)
-    plt.bar(hours, hourly_demand, color='cornflowerblue', alpha=0.5, width=0.8, edgecolor='black', label='Before the regulation (ETA)')
-    plt.bar(hours, served, color='midnightblue', alpha=0.8, width=0.4, edgecolor='black', label='Regulated (CTA)')
+    plt.bar(
+        hours,
+        hourly_demand,
+        color='cornflowerblue',
+        alpha=0.5,
+        width=0.8,
+        edgecolor='black',
+        label='Before the regulation (ETA)',
+    )
+    plt.bar(
+        hours, served, color='midnightblue', alpha=0.8, width=0.4, edgecolor='black', label='Regulated (CTA)'
+    )
     plt.step(hours, capacity, where='mid', color='hotpink', linewidth=3, label='Capacity (AAR / PAAR)')
 
     plt.title('Arrivals per hour before and after the regulation', fontsize=20, fontweight='bold')
@@ -187,9 +235,11 @@ def plot_capacity_balance(
     plt.savefig(out_path, format='svg', transparent=True, bbox_inches='tight')
     plt.close()
 
+
 # =============================================================================
 # 3. COST OF DELAY: DO-NOTHING VS. GDP
 # =============================================================================
+
 
 def plot_cost_vs_do_nothing(df_rbs: pd.DataFrame, out_path: str) -> None:
     """
@@ -217,17 +267,26 @@ def plot_cost_vs_do_nothing(df_rbs: pd.DataFrame, out_path: str) -> None:
     plt.ylim(0, vmax_bar * 1.30)
     for bar_patch in bars:
         height = bar_patch.get_height()
-        plt.text(bar_patch.get_x() + bar_patch.get_width() / 2, height + vmax_bar * 0.03,
-                 f"EUR {int(height):,}", ha='center', va='bottom', fontweight='bold', fontsize=11)
+        plt.text(
+            bar_patch.get_x() + bar_patch.get_width() / 2,
+            height + vmax_bar * 0.03,
+            f"EUR {int(height):,}",
+            ha='center',
+            va='bottom',
+            fontweight='bold',
+            fontsize=11,
+        )
 
     plt.grid(axis='y', linestyle='--', alpha=0.5)
     plt.tight_layout()
     plt.savefig(out_path, format='svg', transparent=True, bbox_inches='tight')
     plt.close()
 
+
 # =============================================================================
 # 4. RBS FAIRNESS BY AIRLINE
 # =============================================================================
+
 
 def plot_airline_fairness(df_rbs: pd.DataFrame, out_path: str) -> None:
     """
@@ -241,17 +300,25 @@ def plot_airline_fairness(df_rbs: pd.DataFrame, out_path: str) -> None:
     top_10 = df_rbs['airline'].value_counts().head(10).index
     means = (
         df_rbs[df_rbs['airline'].isin(top_10)]
-        .groupby('airline')['total_delay'].mean()
+        .groupby('airline')['total_delay']
+        .mean()
         .sort_values(ascending=False)
     )
 
     plt.figure(figsize=(12, 6))
     plt.bar(means.index, means.values, color='mediumpurple', edgecolor='black', alpha=0.8)
     overall_mean = df_rbs['total_delay'].mean()
-    plt.axhline(y=overall_mean, color='red', linestyle='--', linewidth=2,
-                label=f"Mean delay, all affected flights ({overall_mean:.1f} min)")
+    plt.axhline(
+        y=overall_mean,
+        color='red',
+        linestyle='--',
+        linewidth=2,
+        label=f"Mean delay, all affected flights ({overall_mean:.1f} min)",
+    )
 
-    plt.title("RBS fairness: mean delay per airline (top 10 by affected flights)", fontsize=14, fontweight='bold')
+    plt.title(
+        "RBS fairness: mean delay per airline (top 10 by affected flights)", fontsize=14, fontweight='bold'
+    )
     plt.xlabel("Airline (ICAO designator)", fontsize=12)
     plt.ylabel("Mean delay (min)", fontsize=12)
     plt.legend()
@@ -260,9 +327,11 @@ def plot_airline_fairness(df_rbs: pd.DataFrame, out_path: str) -> None:
     plt.savefig(out_path, format='svg', transparent=True, bbox_inches='tight')
     plt.close()
 
+
 # =============================================================================
 # ORCHESTRATOR
 # =============================================================================
+
 
 def plot_wp2_figures(
     timeline: pd.DataFrame,
@@ -304,6 +373,8 @@ if __name__ == "__main__":
         df_rbs=results['allocation'],
         params=params,
         h_noreg=results['h_noreg'],
-        paths={'cum': os.path.join(test_folder, '1_newell.svg'),
-               'bal': os.path.join(test_folder, '2_balance.svg')},
+        paths={
+            'cum': os.path.join(test_folder, '1_newell.svg'),
+            'bal': os.path.join(test_folder, '2_balance.svg'),
+        },
     )

@@ -63,7 +63,11 @@ def test_system_co2_accounting_is_consistent(wp4):
     row = table.loc['System CO2: flights + delay + rail (kg)']
     k = out['kpis']
     base = df['flight_co2_kg'].sum() + k['GDP (RBS)']['delay_co2_kg']
-    inter_ = (df['flight_co2_kg'].sum() - out['co2']['replaced_flights']
-              + k['Intermodal GDP (RBS)']['delay_co2_kg'] + out['co2']['rail'])
+    inter_ = (
+        df['flight_co2_kg'].sum()
+        - out['co2']['replaced_flights']
+        + k['Intermodal GDP (RBS)']['delay_co2_kg']
+        + out['co2']['rail']
+    )
     assert row['GDP (RBS)'] == pytest.approx(base, abs=0.1)
     assert row['Intermodal GDP (RBS)'] == pytest.approx(inter_, abs=0.1)

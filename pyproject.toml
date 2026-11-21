@@ -1,0 +1,20 @@
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["src/emissions_fuel_model.py"]  # third-party file, kept unmodified (GPL-3.0)
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "config", "cost_model", "emissions_fuel_model", "lib_comparison", "lib_compression",
+    "lib_data_prep", "lib_excel_export", "lib_gdp_core", "lib_ghp_solver", "lib_intermodal",
+    "lib_metrics", "lib_sensitivity", "lib_visualization", "lib_wp4_figures",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+
+[tool.ruff.format]
+quote-style = "preserve"

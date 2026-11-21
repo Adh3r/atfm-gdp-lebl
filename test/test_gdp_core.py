@@ -11,11 +11,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'src'))
 
 import config  # noqa: E402
+import cost_model  # noqa: E402
 import lib_data_prep as prep  # noqa: E402
 import lib_gdp_core as gdp  # noqa: E402
-from config import (CFG, FS_CONTROLLED, FS_EXEMPT_FLYING, FS_EXEMPT_INTERNATIONAL,  # noqa: E402
-                    FS_EXEMPT_RADIUS, FS_NOT_AFFECTED)
-import cost_model  # noqa: E402
+from config import (  # noqa: E402
+    CFG,
+    FS_CONTROLLED,
+    FS_EXEMPT_FLYING,
+    FS_EXEMPT_INTERNATIONAL,
+    FS_EXEMPT_RADIUS,
+    FS_NOT_AFFECTED,
+)
 from lib_compression import cancel_and_compress  # noqa: E402
 
 PARAMS = CFG.to_params_dict()
@@ -37,6 +43,7 @@ def _slots(times):
 # -----------------------------------------------------------------------------
 # Newell cumulative curves
 # -----------------------------------------------------------------------------
+
 
 def test_newell_no_queue_when_demand_below_capacity():
     # one arrival every 10 min all day: below 20/h even during the LVP window
@@ -72,19 +79,25 @@ def test_newell_minimum_delay_is_area_between_curves():
 # Exemption rules
 # -----------------------------------------------------------------------------
 
+
 def test_exemption_categories_and_priority():
-    t_file = PARAMS['H_START'] - CFG.H_FILE_OFFSET   # 03:30
-    df = _flights([
-        ('CAN', 500.0, t_file + 30, True, 800.0),     # ECAC, not departed, inside radius
-        ('AIR', 500.0, t_file - 30, True, 800.0),     # departed before the GDP was filed
-        ('FAR', 500.0, t_file + 30, True, 3500.0),    # outside the 3000 km radius
-        ('INT', 500.0, t_file + 30, False, 6000.0),   # non-ECAC
-        ('INA', 500.0, t_file - 300, False, 9000.0),  # non-ECAC and airborne -> INTERNATIONAL first
-    ])
+    t_file = PARAMS['H_START'] - CFG.H_FILE_OFFSET  # 03:30
+    df = _flights(
+        [
+            ('CAN', 500.0, t_file + 30, True, 800.0),  # ECAC, not departed, inside radius
+            ('AIR', 500.0, t_file - 30, True, 800.0),  # departed before the GDP was filed
+            ('FAR', 500.0, t_file + 30, True, 3500.0),  # outside the 3000 km radius
+            ('INT', 500.0, t_file + 30, False, 6000.0),  # non-ECAC
+            ('INA', 500.0, t_file - 300, False, 9000.0),  # non-ECAC and airborne -> INTERNATIONAL first
+        ]
+    )
     status = gdp.classify_flights(df, PARAMS['H_START']).set_index('ARCID')['flight_status']
     assert status.to_dict() == {
-        'CAN': FS_CONTROLLED, 'AIR': FS_EXEMPT_FLYING, 'FAR': FS_EXEMPT_RADIUS,
-        'INT': FS_EXEMPT_INTERNATIONAL, 'INA': FS_EXEMPT_INTERNATIONAL,
+        'CAN': FS_CONTROLLED,
+        'AIR': FS_EXEMPT_FLYING,
+        'FAR': FS_EXEMPT_RADIUS,
+        'INT': FS_EXEMPT_INTERNATIONAL,
+        'INA': FS_EXEMPT_INTERNATIONAL,
     }
 
 
@@ -103,15 +116,21 @@ def test_labelling_does_not_modify_input():
 
 
 def test_flights_outside_hstart_hnoreg_are_not_affected():
-    df = _flights([
-        ('EARLY', 359.0, 300.0, True, 500.0),
-        ('FIRST', 360.0, 300.0, True, 500.0),
-        ('LAST',  999.0, 900.0, True, 500.0),
-        ('AFTER', 1000.0, 900.0, False, 6000.0),   # non-ECAC, but outside the regulation
-    ])
+    df = _flights(
+        [
+            ('EARLY', 359.0, 300.0, True, 500.0),
+            ('FIRST', 360.0, 300.0, True, 500.0),
+            ('LAST', 999.0, 900.0, True, 500.0),
+            ('AFTER', 1000.0, 900.0, False, 6000.0),  # non-ECAC, but outside the regulation
+        ]
+    )
     status = gdp.classify_flights(df, 360, h_noreg=1000).set_index('ARCID')['flight_status']
-    assert status.to_dict() == {'EARLY': FS_NOT_AFFECTED, 'FIRST': FS_CONTROLLED,
-                                'LAST': FS_CONTROLLED, 'AFTER': FS_NOT_AFFECTED}
+    assert status.to_dict() == {
+        'EARLY': FS_NOT_AFFECTED,
+        'FIRST': FS_CONTROLLED,
+        'LAST': FS_CONTROLLED,
+        'AFTER': FS_NOT_AFFECTED,
+    }
 
 
 def test_ready_to_depart_margin_extends_exempt_flying():
@@ -134,11 +153,14 @@ def test_flight_that_left_the_previous_day_is_exempt_flying():
 # RBS slot allocation and delay split
 # -----------------------------------------------------------------------------
 
+
 def test_rbs_gives_exempt_flights_priority():
-    df = _flights([
-        ('CAN', 360.0, 0, True, 500, FS_CONTROLLED),
-        ('EXE', 361.0, 0, False, 5000, FS_EXEMPT_INTERNATIONAL),
-    ])
+    df = _flights(
+        [
+            ('CAN', 360.0, 0, True, 500, FS_CONTROLLED),
+            ('EXE', 361.0, 0, False, 5000, FS_EXEMPT_INTERNATIONAL),
+        ]
+    )
     res = gdp.assign_slots_rbs(df, _slots([362, 365]))
     slots = res.set_index('ARCID')['assigned_slot']
     assert slots['EXE'] == 362 and slots['CAN'] == 365
@@ -158,7 +180,9 @@ def test_rbs_leaves_flight_unassigned_when_no_slot_left():
 
 
 def test_delay_split_air_for_exempt_ground_for_candidates():
-    df = _flights([('CAN', 360.0, 0, True, 500, FS_CONTROLLED), ('EXE', 360.0, 0, False, 5000, FS_EXEMPT_INTERNATIONAL)])
+    df = _flights(
+        [('CAN', 360.0, 0, True, 500, FS_CONTROLLED), ('EXE', 360.0, 0, False, 5000, FS_EXEMPT_INTERNATIONAL)]
+    )
     df['assigned_slot'] = [370.0, 365.0]
     res = gdp.compute_delays(df).set_index('ARCID')
     assert res.loc['CAN', ['total_delay', 'ground_delay', 'air_delay']].tolist() == [10, 10, 0]
@@ -169,12 +193,16 @@ def test_delay_split_air_for_exempt_ground_for_candidates():
 # Unrecoverable delay and KPIs
 # -----------------------------------------------------------------------------
 
+
 def test_unrecoverable_delay_cases():
     h = 360
-    df = pd.DataFrame({
-        'minutes_etd':  [400.0, 300.0, 330.0, 300.0],
-        'ground_delay': [ 50.0,  40.0,  60.0,   0.0],
-    }, index=['case1', 'case2', 'case3', 'no_delay'])
+    df = pd.DataFrame(
+        {
+            'minutes_etd': [400.0, 300.0, 330.0, 300.0],
+            'ground_delay': [50.0, 40.0, 60.0, 0.0],
+        },
+        index=['case1', 'case2', 'case3', 'no_delay'],
+    )
     lost = gdp.unrecoverable_delay(df, h)
     assert lost.to_dict() == {'case1': 0.0, 'case2': 40.0, 'case3': 30.0, 'no_delay': 0.0}
 
@@ -185,14 +213,22 @@ def test_ground_co2_uses_apu_fuel_at_the_gate():
     apu = 110 / 60 * 0.25 * 3.16
     assert cost_model.ground_co2_kg_per_min([180])[0] == pytest.approx(apu)
     assert cost_model.ground_co2_kg_per_min([80, 250, 400]).tolist() == pytest.approx(
-        [f / 60 * 0.25 * 3.16 for f in (101, 164, 238)])
+        [f / 60 * 0.25 * 3.16 for f in (101, 164, 238)]
+    )
     assert cost_model.ground_co2_kg_per_min([180], 'low')[0] == 0
     assert cost_model.ground_co2_kg_per_min([180], 'high')[0] == pytest.approx(2 * apu)
-    df = pd.DataFrame({
-        'total_delay': [30.0, 10.0], 'air_delay': [0.0, 10.0], 'ground_delay': [30.0, 0.0],
-        'flight_co2_kg': [6000.0, 9000.0], 'block_time_min': [60.0, 90.0],
-        'recat': ['D', 'B'], 'size_seats_avg': [180, 280], 'minutes_etd': [500.0, 500.0],
-    })
+    df = pd.DataFrame(
+        {
+            'total_delay': [30.0, 10.0],
+            'air_delay': [0.0, 10.0],
+            'ground_delay': [30.0, 0.0],
+            'flight_co2_kg': [6000.0, 9000.0],
+            'block_time_min': [60.0, 90.0],
+            'recat': ['D', 'B'],
+            'size_seats_avg': [180, 280],
+            'minutes_etd': [500.0, 500.0],
+        }
+    )
     k = gdp.gdp_vs_do_nothing(df)
     assert k['ground_delay_co2'] == pytest.approx(30 * apu, abs=0.01)
     assert k['air_delay_co2'] == pytest.approx(10 * 9000 / 90, abs=0.01)
@@ -202,8 +238,10 @@ def test_ground_co2_uses_apu_fuel_at_the_gate():
     # instead of en route saves the en-route minus at-gate primary cost (the
     # passenger part is the same in both phases), in 2022 prices
     cook_type, _ = cost_model._cook_type_and_factor(df.iloc[0])
-    saving = (cost_model.primary_cost(cook_type, [30.0], 'en_route')
-              - cost_model.primary_cost(cook_type, [30.0], 'at_gate'))[0] * cost_model.PRICE_FACTOR_2014_TO_2022
+    saving = (
+        cost_model.primary_cost(cook_type, [30.0], 'en_route')
+        - cost_model.primary_cost(cook_type, [30.0], 'at_gate')
+    )[0] * cost_model.PRICE_FACTOR_2014_TO_2022
     assert k["cost_savings"] == pytest.approx(saving, abs=0.01)
 
 
@@ -211,16 +249,22 @@ def test_ground_co2_uses_apu_fuel_at_the_gate():
 # Cancellations, substitution and compression (WP2)
 # -----------------------------------------------------------------------------
 
+
 def _cancellation_case():
     # Controlled flights queued behind each other (slot, delay):
     # VLG1 360/0, RYR1 380/19, VLG2 400/38, VLG3 420/57, RYR2 440/76,
     # VLG4 460/95, VLG5 470/15.
-    df = _flights([
-        ('VLG1', 360.0, 0, True, 500), ('RYR1', 361.0, 0, True, 500),
-        ('VLG2', 362.0, 0, True, 500), ('VLG3', 363.0, 0, True, 500),
-        ('RYR2', 364.0, 0, True, 500), ('VLG4', 365.0, 0, True, 500),
-        ('VLG5', 455.0, 0, True, 500),
-    ])
+    df = _flights(
+        [
+            ('VLG1', 360.0, 0, True, 500),
+            ('RYR1', 361.0, 0, True, 500),
+            ('VLG2', 362.0, 0, True, 500),
+            ('VLG3', 363.0, 0, True, 500),
+            ('RYR2', 364.0, 0, True, 500),
+            ('VLG4', 365.0, 0, True, 500),
+            ('VLG5', 455.0, 0, True, 500),
+        ]
+    )
     df['assigned_slot'] = [360.0, 380.0, 400.0, 420.0, 440.0, 460.0, 470.0]
     return gdp.compute_delays(df)
 
@@ -234,7 +278,7 @@ def test_only_that_airlines_flights_above_the_threshold_are_cancelled(capsys):
     out, summary = cancel_and_compress(_cancellation_case(), delay_threshold=50)
     out = out.set_index('ARCID')
     cancelled = set(out.index[out['assigned_slot'].isna()])
-    assert cancelled == {'VLG3', 'VLG4'}                 # RYR2 (76 min) belongs to another airline
+    assert cancelled == {'VLG3', 'VLG4'}  # RYR2 (76 min) belongs to another airline
     assert summary['cancelled_flights'] == 2
 
 
@@ -242,7 +286,7 @@ def test_substitution_gives_the_freed_slot_to_the_airlines_next_flight(capsys):
     out, summary = cancel_and_compress(_cancellation_case(), delay_threshold=60)
     out = out.set_index('ARCID')
     assert np.isnan(out.loc['VLG4', 'assigned_slot'])
-    assert out.loc['VLG5', 'assigned_slot'] == 460       # VLG keeps its own slot
+    assert out.loc['VLG5', 'assigned_slot'] == 460  # VLG keeps its own slot
     assert summary['moved_by_substitution'] == 1
     assert summary['moved_by_compression'] == 0
 
@@ -268,6 +312,7 @@ def test_cancellations_only_move_flights_earlier_and_keep_slots_unique(capsys):
 # -----------------------------------------------------------------------------
 # Full GDP run on the synthetic day
 # -----------------------------------------------------------------------------
+
 
 @pytest.fixture(scope='module')
 def gdp_run():

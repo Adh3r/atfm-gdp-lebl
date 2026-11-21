@@ -46,7 +46,10 @@ from scipy.optimize import linear_sum_assignment
 
 from config import FS_CONTROLLED, FS_NOT_AFFECTED
 from cost_model import (
-    DEFAULT_COST_BASE, _cook_type_and_factor, flight_cost, ground_co2_kg_per_min,
+    DEFAULT_COST_BASE,
+    _cook_type_and_factor,
+    flight_cost,
+    ground_co2_kg_per_min,
     turnaround_buffer,
 )
 from lib_gdp_core import compute_delays
@@ -72,14 +75,15 @@ OBJECTIVES = ('validation', 'emissions', 'cost')
 # Scenario keys in the results dictionary.
 SCENARIOS = {
     'validation': 'GHP_Validation',
-    'emissions':  'GHP_Emissions',
-    'cost':       'GHP_Cost',
+    'emissions': 'GHP_Emissions',
+    'cost': 'GHP_Cost',
 }
 
 
 # =============================================================================
 # EXEMPT FLIGHTS: served first, in ETA order (air delay)
 # =============================================================================
+
 
 def assign_exempt(df_exempt: pd.DataFrame, slots: np.ndarray) -> tuple[dict, set]:
     """First free slot at or after the ETA, in ETA order (same rule as RBS)."""
@@ -96,6 +100,7 @@ def assign_exempt(df_exempt: pd.DataFrame, slots: np.ndarray) -> tuple[dict, set
 # =============================================================================
 # COST MATRIX c_ft FOR THE CONTROLLED FLIGHTS
 # =============================================================================
+
 
 def build_cost_matrix(
     df_controlled: pd.DataFrame,
@@ -114,7 +119,7 @@ def build_cost_matrix(
     if objective not in OBJECTIVES:
         raise ValueError(f"objective must be one of {OBJECTIVES}")
     eta = df_controlled['minutes_eta'].to_numpy(dtype=float)
-    delay = slots[None, :] - eta[:, None]                     # t - ETA_f
+    delay = slots[None, :] - eta[:, None]  # t - ETA_f
     feasible = delay >= -1e-9
     d = np.clip(delay, 0, None)
 
@@ -139,6 +144,7 @@ def build_cost_matrix(
 # =============================================================================
 # SOLVER
 # =============================================================================
+
 
 def solve_ghp(
     df_affected: pd.DataFrame,
@@ -171,8 +177,9 @@ def solve_ghp(
         if (cost[rows, cols] >= _FORBIDDEN).any():
             raise RuntimeError(
                 "Infeasible GHP: a controlled flight has no slot between its ETA and "
-                f"ETA + {max_ground_delay} min (raise MAX_GROUND_DELAY_MIN).")
-        for f, t in zip(rows, cols):
+                f"ETA + {max_ground_delay} min (raise MAX_GROUND_DELAY_MIN)."
+            )
+        for f, t in zip(rows, cols, strict=True):
             assigned[df_ctrl.index[f]] = free[t]
 
     res = df_affected.copy()
@@ -200,8 +207,10 @@ def run_ghp(
         results[key] = solve_ghp(df, available_slots, objective, max_ground_delay)
         if verbose:
             r = results[key]
-            print(f"   [{key}] total delay {r['total_delay'].sum():.1f} min, "
-                  f"max {r['total_delay'].max():.1f} min")
+            print(
+                f"   [{key}] total delay {r['total_delay'].sum():.1f} min, "
+                f"max {r['total_delay'].max():.1f} min"
+            )
     results['max_air_delay_ok'] = all(
         results[k]['air_delay'].max() <= MAX_AIR_DELAY_MIN for k in SCENARIOS.values()
     )
@@ -211,6 +220,7 @@ def run_ghp(
 # =============================================================================
 # SENSITIVITY OF THE COST OBJECTIVE (WP3 Task 3: "vary the values of r_f")
 # =============================================================================
+
 
 def _airline_rsd(df: pd.DataFrame, top_n: int = 4) -> float:
     top = df['airline'].value_counts().head(top_n).index
@@ -253,8 +263,13 @@ def cost_model_sensitivity(
 
     solutions = [('GDP (RBS)', None, df)]
     for base, mtt, name in SENSITIVITY_MODELS:
-        solutions.append((f'GHP cost, optimised on: {name}', (base, mtt),
-                           solve_ghp(df, available_slots, 'cost', max_ground_delay, base, mtt)))
+        solutions.append(
+            (
+                f'GHP cost, optimised on: {name}',
+                (base, mtt),
+                solve_ghp(df, available_slots, 'cost', max_ground_delay, base, mtt),
+            )
+        )
 
     rows = []
     for name, model, sol in solutions:
@@ -275,6 +290,7 @@ def cost_model_sensitivity(
 # =============================================================================
 # WP3 FIGURES
 # =============================================================================
+
 
 def plot_wp3_figures(scenarios: dict, out_dir: str, top_n: int = 4) -> list[str]:
     """
@@ -314,8 +330,10 @@ def plot_wp3_figures(scenarios: dict, out_dir: str, top_n: int = 4) -> list[str]
     # --- 2. Cost of delay curves ---
     delays = np.linspace(0, 300, 601)
     fig, ax = plt.subplots(figsize=(9, 5))
+
     def a320(buffer, base):
         return flight_cost('A320', 1.0, delays, 0.0, buffer, base)
+
     curves = (
         ('Primary only (no knock-on)', a320(np.nan, 'primary'), '#4A6FA5', '-'),
         ('Turnaround buffer 15 min', a320(15.0, 'rotation'), '#E67E22', '-'),
@@ -335,10 +353,9 @@ def plot_wp3_figures(scenarios: dict, out_dir: str, top_n: int = 4) -> list[str]
 
     # --- 3. Fairness: mean delay per airline ---
     names = list(scenarios)
-    means = pd.DataFrame({
-        n: scenarios[n].groupby('airline')['total_delay'].mean().reindex(airlines)
-        for n in names
-    })
+    means = pd.DataFrame(
+        {n: scenarios[n].groupby('airline')['total_delay'].mean().reindex(airlines) for n in names}
+    )
     x = np.arange(len(airlines))
     w = 0.8 / len(names)
     fig, ax = plt.subplots(figsize=(9, 5))
@@ -371,5 +388,7 @@ if __name__ == '__main__':
     res_gdp = gdp.run_gdp(df_flights, params, run_compression=False)
     rbs = res_gdp['allocation']
     res = run_ghp(rbs, list(res_gdp['slots']['slot_start_min']), params, verbose=True)
-    print(f"RBS total delay: {rbs['total_delay'].sum():.1f} min "
-          f"(validation GHP: {res['GHP_Validation']['total_delay'].sum():.1f})")
+    print(
+        f"RBS total delay: {rbs['total_delay'].sum():.1f} min "
+        f"(validation GHP: {res['GHP_Validation']['total_delay'].sum():.1f})"
+    )

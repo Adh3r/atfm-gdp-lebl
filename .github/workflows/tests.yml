@@ -14,7 +14,11 @@ jobs:
           python-version: '3.12'
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt ruff==0.17.6
+      - name: Lint and format check
+        run: |
+          ruff check .
+          ruff format --check .
       - name: Run the test suite (synthetic traffic day)
         env:
           MPLBACKEND: Agg

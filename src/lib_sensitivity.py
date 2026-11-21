@@ -24,8 +24,8 @@ from config import CFG
 # PARAMETER GRID
 # =============================================================================
 
-RADII_KM  = [500, 1000, 1500, 2000, 2500, 3000]    # radius of exemption (km)
-HFILE_MINS = [30, 60, 90, 120, 150, 180, 210]        # Hstart - Hfile (min)
+RADII_KM = [500, 1000, 1500, 2000, 2500, 3000]  # radius of exemption (km)
+HFILE_MINS = [30, 60, 90, 120, 150, 180, 210]  # Hstart - Hfile (min)
 
 # =============================================================================
 # HEATMAPS: (column, title, unit, 'min' | 'max' = which value is best)
@@ -33,18 +33,19 @@ HFILE_MINS = [30, 60, 90, 120, 150, 180, 210]        # Hstart - Hfile (min)
 
 HEATMAPS = [
     # KPIs asked for in the statement
-    ('air_delay_total',     'Trade-off: Total AIR Delay',               'min', 'min'),
-    ('ground_delay_co2',    'CO2 Emissions Due to GROUND Delay',        'kg',  'min'),
-    ('air_delay_co2',      'CO2 Emissions Due to AIR Delay',           'kg',  'min'),
-    ('unrecoverable_delay', 'Unrecoverable Delay (GDP cancelled)',      'min', 'min'),
+    ('air_delay_total', 'Trade-off: Total AIR Delay', 'min', 'min'),
+    ('ground_delay_co2', 'CO2 Emissions Due to GROUND Delay', 'kg', 'min'),
+    ('air_delay_co2', 'CO2 Emissions Due to AIR Delay', 'kg', 'min'),
+    ('unrecoverable_delay', 'Unrecoverable Delay (GDP cancelled)', 'min', 'min'),
     # additional KPIs
-    ('co2_savings',         'Net CO2 Savings vs. Do-Nothing',           'kg',  'max'),
-    ('cost_savings',        'Total Economic Savings vs. Do-Nothing',    'EUR', 'max'),
+    ('co2_savings', 'Net CO2 Savings vs. Do-Nothing', 'kg', 'max'),
+    ('cost_savings', 'Total Economic Savings vs. Do-Nothing', 'EUR', 'max'),
 ]
 
 # =============================================================================
 # ONE GDP RUN PER GRID CELL
 # =============================================================================
+
 
 def _run_cell(
     df_flights: pd.DataFrame,
@@ -77,19 +78,21 @@ def _run_cell(
     kpis = gdp_vs_do_nothing(df_result, params['H_START'])
 
     return {
-        'radius_km':           radius_km,
-        'h_file':              h_file,
-        'air_delay_total':     float(df_result['air_delay'].sum()),
+        'radius_km': radius_km,
+        'h_file': h_file,
+        'air_delay_total': float(df_result['air_delay'].sum()),
         'unrecoverable_delay': kpis['unrecoverable_delay'],
-        'cost_savings':        kpis['cost_savings'],
-        'co2_savings':         kpis['co2_savings'],
-        'air_delay_co2':      kpis['air_delay_co2'],
-        'ground_delay_co2':    kpis['ground_delay_co2'],
+        'cost_savings': kpis['cost_savings'],
+        'co2_savings': kpis['co2_savings'],
+        'air_delay_co2': kpis['air_delay_co2'],
+        'ground_delay_co2': kpis['ground_delay_co2'],
     }
+
 
 # =============================================================================
 # ORCHESTRATOR
 # =============================================================================
+
 
 def run_sensitivity(
     df_flights: pd.DataFrame,
@@ -122,8 +125,11 @@ def run_sensitivity(
                 cell = _run_cell(df_flights, params, radius, offset)
             cells.append(cell)
             n = i * len(HFILE_MINS) + j + 1
-            print(f"   [{n:02d}/{total}] R={radius:4d} km  Hstart-Hfile={offset:3d} min  "
-                  f"air delay={cell['air_delay_total']:.0f} min", end='\r')
+            print(
+                f"   [{n:02d}/{total}] R={radius:4d} km  Hstart-Hfile={offset:3d} min  "
+                f"air delay={cell['air_delay_total']:.0f} min",
+                end='\r',
+            )
     print()
 
     grid = pd.DataFrame(cells)

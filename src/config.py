@@ -31,9 +31,11 @@ def traffic_file() -> str:
         return override
     return REAL_TRAFFIC if os.path.exists(REAL_TRAFFIC) else SAMPLE_TRAFFIC
 
+
 # =============================================================================
 # GDP parameters at LEBL (Barcelona-El Prat)
 # =============================================================================
+
 
 @dataclass(frozen=True)
 class AirportConfig:
@@ -76,13 +78,14 @@ class AirportConfig:
         HNoReg (end time of the regulation, when the queue has dissolved) is
         not a parameter: it is computed from the Newell curves.
     """
-    AAR:             int = 38    # arrivals/hour, nominal (see below)
-    PAAR:            int = 20    # arrivals/hour, during the GDP
-    H_START:         int = 360   # 06:00 UTC
-    H_END:           int = 780   # 13:00 UTC
-    H_FILE_OFFSET:   int = 150   # Hfile = Hstart - 150 min = 03:30 UTC
-    GDP_RADIUS_KM:   int = 3000  # radius of exemption
-    READY_MARGIN:    int = 30    # min after Hfile: flights ready to depart are exempt
+
+    AAR: int = 38  # arrivals/hour, nominal (see below)
+    PAAR: int = 20  # arrivals/hour, during the GDP
+    H_START: int = 360  # 06:00 UTC
+    H_END: int = 780  # 13:00 UTC
+    H_FILE_OFFSET: int = 150  # Hfile = Hstart - 150 min = 03:30 UTC
+    GDP_RADIUS_KM: int = 3000  # radius of exemption
+    READY_MARGIN: int = 30  # min after Hfile: flights ready to depart are exempt
 
     @property
     def H_FILE(self) -> int:
@@ -108,7 +111,7 @@ class AirportConfig:
         Returns parameters that run_gdp() will need.
 
         THIS METHOD:
-            with this method, we gather all info in a unique place (this dictionary) 
+            with this method, we gather all info in a unique place (this dictionary)
             and if anything changes in the parameters, the function will read from here.
 
         USE:
@@ -116,10 +119,10 @@ class AirportConfig:
             params = CFG.to_params_dict()
         """
         return {
-            'H_START':  self.H_START,
-            'H_END':    self.H_END,
-            'AAR':      self.AAR,
-            'PAAR':     self.PAAR,
+            'H_START': self.H_START,
+            'H_END': self.H_END,
+            'AAR': self.AAR,
+            'PAAR': self.PAAR,
             'SLOT_NOM': self.SLOT_NOM,
             'SLOT_RED': self.SLOT_RED,
         }
@@ -137,13 +140,55 @@ class AirportConfig:
 # outside the area where the Network Manager issues slots (CTOTs) cannot be
 # held on the ground by a regulation.
 
-ECAC_PREFIXES: tuple = tuple([
-    'EB', 'ED', 'EE', 'EF', 'EG', 'EH', 'EI', 'EK', 'EL', 'EN', 'EP',
-    'ES', 'ET', 'EV', 'EY',
-    'LA', 'LB', 'LC', 'LD', 'LE', 'LF', 'LG', 'LH', 'LI', 'LJ', 'LK',
-    'LM', 'LN', 'LO', 'LP', 'LQ', 'LR', 'LS', 'LT', 'LU', 'LW', 'LY', 'LZ',
-    'BI', 'GC', 'GE', 'UD', 'UG', 'UK', 'UB',
-])
+ECAC_PREFIXES: tuple = tuple(
+    [
+        'EB',
+        'ED',
+        'EE',
+        'EF',
+        'EG',
+        'EH',
+        'EI',
+        'EK',
+        'EL',
+        'EN',
+        'EP',
+        'ES',
+        'ET',
+        'EV',
+        'EY',
+        'LA',
+        'LB',
+        'LC',
+        'LD',
+        'LE',
+        'LF',
+        'LG',
+        'LH',
+        'LI',
+        'LJ',
+        'LK',
+        'LM',
+        'LN',
+        'LO',
+        'LP',
+        'LQ',
+        'LR',
+        'LS',
+        'LT',
+        'LU',
+        'LW',
+        'LY',
+        'LZ',
+        'BI',
+        'GC',
+        'GE',
+        'UD',
+        'UG',
+        'UK',
+        'UB',
+    ]
+)
 
 
 # =============================================================================
@@ -151,11 +196,11 @@ ECAC_PREFIXES: tuple = tuple([
 # =============================================================================
 #
 # Emissions aren't handcoded. We use the Montlaur (2025) model https://doi.org/10.3390/app15179688
-# based on flight distance + seat count. 
+# based on flight distance + seat count.
 # Logic is in src/emissions_fuel_model.py and runs during Phase 1.
 
 # =============================================================================
-# FLIGHT_STATUS TAGS 
+# FLIGHT_STATUS TAGS
 # =============================================================================
 # Use these constants instead of raw strings to filter df['flight_status'].
 # Because typos in strings (like 'GPD' instead of 'GDP') fail usually.
@@ -166,11 +211,11 @@ ECAC_PREFIXES: tuple = tuple([
 # "determine flight status"). The delivered project used its own labels
 # (GDP CANDIDATE, EXEMPT AIRBORNE, EXEMPT DISTANCE, EXEMPT INTERNATIONAL).
 
-FS_NOT_AFFECTED         = 'NotAffected'          # ETA before Hstart or at/after HNoReg
-FS_CONTROLLED           = 'Controlled'           # receives ground delay (CTD/CTA)
+FS_NOT_AFFECTED = 'NotAffected'  # ETA before Hstart or at/after HNoReg
+FS_CONTROLLED = 'Controlled'  # receives ground delay (CTD/CTA)
 FS_EXEMPT_INTERNATIONAL = 'ExemptInternational'  # origin outside the ECAC area
-FS_EXEMPT_FLYING        = 'ExemptFlying'         # already flying at Hfile
-FS_EXEMPT_RADIUS        = 'ExemptRadius'         # origin beyond the radius of exemption
+FS_EXEMPT_FLYING = 'ExemptFlying'  # already flying at Hfile
+FS_EXEMPT_RADIUS = 'ExemptRadius'  # origin beyond the radius of exemption
 
 
 # =============================================================================

@@ -14,37 +14,41 @@ from openpyxl.utils import get_column_letter
 
 # Header colours
 COLOR_HEADER_GDP = "FF1F4E79"  # dark blue: GDP
-COLOR_HEADER_GHP  = "FF375623"  # dark green: GHP scenarios
-COLOR_HEADER_INTERMODAL  = "FF7030A0"  # purple: intermodal scenarios
-COLOR_SECTION       = "FF2E75B6"
-COLOR_ROW_ALT  = "FFD9E1F2"
-COLOR_ROW_WHITE   = "FFFFFFFF"
-BASE_FONT         = "Arial"
+COLOR_HEADER_GHP = "FF375623"  # dark green: GHP scenarios
+COLOR_HEADER_INTERMODAL = "FF7030A0"  # purple: intermodal scenarios
+COLOR_SECTION = "FF2E75B6"
+COLOR_ROW_ALT = "FFD9E1F2"
+COLOR_ROW_WHITE = "FFFFFFFF"
+BASE_FONT = "Arial"
 
 # =============================================================================
 # STYLE HELPERS
 # =============================================================================
 
+
 def _thin_border():
     side = Side(style="thin", color="FFD0D0D0")
     return Border(left=side, right=side, top=side, bottom=side)
 
+
 def _header_style(fill_color=COLOR_HEADER_GDP):
     return {
-        'font':      Font(name=BASE_FONT, size=11, bold=True, color="FFFFFFFF"),
-        'fill':      PatternFill("solid", fgColor=fill_color),
+        'font': Font(name=BASE_FONT, size=11, bold=True, color="FFFFFFFF"),
+        'fill': PatternFill("solid", fgColor=fill_color),
         'alignment': Alignment(horizontal="center", vertical="center", wrap_text=True),
-        'border':    _thin_border(),
+        'border': _thin_border(),
     }
+
 
 def _data_style(even_row=False, bold=False):
     color = COLOR_ROW_ALT if even_row else COLOR_ROW_WHITE
     return {
-        'font':      Font(name=BASE_FONT, size=10, bold=bold),
-        'fill':      PatternFill("solid", fgColor=color),
+        'font': Font(name=BASE_FONT, size=10, bold=bold),
+        'fill': PatternFill("solid", fgColor=color),
         'alignment': Alignment(horizontal="left", vertical="center", wrap_text=False),
-        'border':    _thin_border(),
+        'border': _thin_border(),
     }
+
 
 def _autofit_columns(ws, min_width=12, max_width=50):
     for col_cells in ws.columns:
@@ -55,9 +59,11 @@ def _autofit_columns(ws, min_width=12, max_width=50):
                 max_len = max(max_len, len(str(cell_.value)))
         ws.column_dimensions[col_letter].width = min(max_width, max(min_width, max_len * 1.1 + 2))
 
+
 # =============================================================================
 # SHEET WRITER (number format from the column name)
 # =============================================================================
+
 
 def _write_df(ws, df, color_header=COLOR_HEADER_GDP):
     """Write df to ws with styled headers and a number format inferred from each column name."""
@@ -66,9 +72,11 @@ def _write_df(ws, df, color_header=COLOR_HEADER_GDP):
     for col_idx, col_name in enumerate(cols, start=1):
         cell_ = ws.cell(row=1, column=col_idx, value=col_name)
         styles = _header_style(color_header)
-        cell_.font = styles['font']; cell_.fill = styles['fill']
-        cell_.alignment = styles['alignment']; cell_.border = styles['border']
-    
+        cell_.font = styles['font']
+        cell_.fill = styles['fill']
+        cell_.alignment = styles['alignment']
+        cell_.border = styles['border']
+
     ws.row_dimensions[1].height = 30
 
     # Number format per column
@@ -85,9 +93,9 @@ def _write_df(ws, df, color_header=COLOR_HEADER_GDP):
 
     # Data
     for row_idx, row in enumerate(df.values, start=2):
-        even_row = (row_idx % 2 == 0)
+        even_row = row_idx % 2 == 0
         is_section = str(row[0]).startswith('--')
-        
+
         for col_idx, value in enumerate(row, start=1):
             cell_ = ws.cell(row=row_idx, column=col_idx, value=value)
             if is_section:
@@ -95,19 +103,22 @@ def _write_df(ws, df, color_header=COLOR_HEADER_GDP):
                 cell_.fill = PatternFill("solid", fgColor=COLOR_SECTION)
             else:
                 styles = _data_style(even_row)
-                cell_.font = styles['font']; cell_.fill = styles['fill']
+                cell_.font = styles['font']
+                cell_.fill = styles['fill']
                 cell_.border = styles['border']
                 cell_.alignment = styles['alignment']
-                
+
                 # number format for numeric cells
                 if isinstance(value, (int, float)):
                     cell_.number_format = col_formats[col_idx]
-                    
+
         ws.row_dimensions[row_idx].height = 18
+
 
 # =============================================================================
 # WORKBOOK
 # =============================================================================
+
 
 def export_audit_workbook(
     df_flights_raw: pd.DataFrame,
@@ -155,9 +166,20 @@ def export_audit_workbook(
 
     # 3. Flight-by-flight audit of every scenario
     audit_cols = [
-        'ARCID', 'airline', 'ADEP', 'ATYP', 'distance_km', 'flight_status',
-        'minutes_etd', 'minutes_eta', 'CTD', 'CTA',
-        'total_delay', 'air_delay', 'ground_delay', 'flight_co2_kg',
+        'ARCID',
+        'airline',
+        'ADEP',
+        'ATYP',
+        'distance_km',
+        'flight_status',
+        'minutes_etd',
+        'minutes_eta',
+        'CTD',
+        'CTA',
+        'total_delay',
+        'air_delay',
+        'ground_delay',
+        'flight_co2_kg',
     ]
     for name, df in scenario_tables.items():
         if df is None or df.empty:
@@ -171,7 +193,8 @@ def export_audit_workbook(
         ws.sheet_properties.tabColor = tab_color
         df_audit = df[[c for c in audit_cols if c in df.columns]]
         _write_df(
-            ws, df_audit.sort_values('minutes_eta').reset_index(drop=True), color_header="FF" + tab_color)
+            ws, df_audit.sort_values('minutes_eta').reset_index(drop=True), color_header="FF" + tab_color
+        )
         _autofit_columns(ws)
         ws.freeze_panes = "A2"
 
@@ -181,7 +204,11 @@ def export_audit_workbook(
         _sheet_compression(wb, base, df_compressed)
 
     # 5. WP4 comparison (kept for backwards compatibility if not in the summaries)
-    if df_intermodal is not None and not df_intermodal.empty and 'WP4_Intermodal' not in (summary_tables or {}):
+    if (
+        df_intermodal is not None
+        and not df_intermodal.empty
+        and 'WP4_Intermodal' not in (summary_tables or {})
+    ):
         ws_int = wb.create_sheet("WP4_Intermodal")
         ws_int.sheet_properties.tabColor = "7030A0"
         _write_df(ws_int, df_intermodal, COLOR_HEADER_INTERMODAL)
@@ -194,9 +221,11 @@ def export_audit_workbook(
     wb.save(path)
     print(f"   Excel workbook written: {os.path.basename(path)}")
 
+
 # =============================================================================
 # FUNCIONES DE APOYO
 # =============================================================================
+
 
 def compression_table(df_rbs: pd.DataFrame, df_compressed: pd.DataFrame) -> pd.DataFrame:
     """
@@ -205,17 +234,20 @@ def compression_table(df_rbs: pd.DataFrame, df_compressed: pd.DataFrame) -> pd.D
     matched by index (callsigns are not unique in the traffic file).
     """
     before = df_rbs[['ARCID', 'airline', 'flight_status', 'minutes_eta', 'CTA', 'total_delay']].rename(
-        columns={'minutes_eta': 'ETA', 'CTA': 'CTA_before', 'total_delay': 'delay_before'})
+        columns={'minutes_eta': 'ETA', 'CTA': 'CTA_before', 'total_delay': 'delay_before'}
+    )
     after = df_compressed[['assigned_slot', 'total_delay']].rename(
-        columns={'assigned_slot': 'CTA_after', 'total_delay': 'delay_after'})
+        columns={'assigned_slot': 'CTA_after', 'total_delay': 'delay_after'}
+    )
     df = before.join(after, how='left')
     df['status'] = np.select(
         [df['CTA_after'].isna(), df['CTA_after'] < df['CTA_before']],
         ['Cancelled', 'Moved earlier'],
         default='No change',
     )
-    df['minutes_saved'] = np.where(df['status'] == 'Moved earlier',
-                                   df['delay_before'] - df['delay_after'], 0.0)
+    df['minutes_saved'] = np.where(
+        df['status'] == 'Moved earlier', df['delay_before'] - df['delay_after'], 0.0
+    )
     return df.sort_values('ETA').reset_index(drop=True)
 
 

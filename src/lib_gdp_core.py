@@ -35,6 +35,7 @@ from cost_model import flight_costs, ground_co2_kg_per_min
 # 1. NEWELL MODEL - WHEN AND HOW MUCH DOES THE AIRPORT SATURATE?
 # =============================================================================
 
+
 def simulate_newell_curves(
     df_flights: pd.DataFrame,
     params: dict,
@@ -58,10 +59,10 @@ def simulate_newell_curves(
         (timeline, h_noreg)
     """
     h_start = params['H_START']
-    h_end   = params['H_END']
+    h_end = params['H_END']
 
     # Acceptance rates in aircraft per minute (inverse of the slot interval).
-    rate_nominal  = 1 / params['SLOT_NOM']  # AAR, nominal
+    rate_nominal = 1 / params['SLOT_NOM']  # AAR, nominal
     rate_reduced = 1 / params['SLOT_RED']  # PAAR, low-visibility procedures
 
     timeline = pd.DataFrame({'minute': range(1440)})
@@ -73,8 +74,9 @@ def simulate_newell_curves(
     # -------------------------------------------------------------------------
     eta_minute = np.floor(df_flights['minutes_eta']).astype(int)
     flights_per_minute = (
-        eta_minute.value_counts()                    # flights per ETA minute
-        .reindex(timeline['minute'], fill_value=0)   # minutes with no arrival -> 0
+        eta_minute.value_counts().reindex(  # flights per ETA minute
+            timeline['minute'], fill_value=0
+        )  # minutes with no arrival -> 0
     )
     timeline['demand_accum'] = flights_per_minute.cumsum()
 
@@ -85,7 +87,7 @@ def simulate_newell_curves(
     #   after Hend:          nominal capacity (AAR), the queue dissolves.
     # -------------------------------------------------------------------------
     cumulative_capacity = []
-    capacity_now    = 0.0
+    capacity_now = 0.0
 
     for minute in timeline['minute']:
         demand_so_far = timeline.loc[minute, 'demand_accum']
@@ -104,9 +106,7 @@ def simulate_newell_curves(
         cumulative_capacity.append(capacity_now)
 
     timeline['capacity_accum'] = cumulative_capacity
-    timeline['queue_size'] = (
-        timeline['demand_accum'] - timeline['capacity_accum']
-    ).clip(lower=0)
+    timeline['queue_size'] = (timeline['demand_accum'] - timeline['capacity_accum']).clip(lower=0)
 
     # -------------------------------------------------------------------------
     # HNoReg: first minute after Hend with less than 0.5 aircraft in the queue
@@ -118,14 +118,16 @@ def simulate_newell_curves(
 
     return timeline, h_noreg
 
+
 # =============================================================================
 # 2. FLIGHT STATUS
 # =============================================================================
 
+
 def classify_flights(
     df_flights: pd.DataFrame,
     h_start: int,
-    radius_km: int  = CFG.GDP_RADIUS_KM,
+    radius_km: int = CFG.GDP_RADIUS_KM,
     h_file_offset: int = CFG.H_FILE_OFFSET,
     h_noreg: int | None = None,
     ready_margin: int = CFG.READY_MARGIN,
@@ -179,12 +181,7 @@ def classify_flights(
     else:
         df['is_affected'] = (df['minutes_eta'] >= h_start) & (df['minutes_eta'] < h_noreg)
 
-    df['is_controlled'] = (
-        df['is_affected']
-        & df['is_ecac']
-        & ~df['is_departed']
-        & df['is_inside_radius']
-    )
+    df['is_controlled'] = df['is_affected'] & df['is_ecac'] & ~df['is_departed'] & df['is_inside_radius']
 
     # np.select evaluates the conditions in order: the first True one wins.
     conditions = [
@@ -205,9 +202,11 @@ def classify_flights(
 
     return df
 
+
 # =============================================================================
 # 3. SLOT ALLOCATION - RATION-BY-SCHEDULE (RBS)
 # =============================================================================
+
 
 def assign_slots_rbs(
     df_affected: pd.DataFrame,
@@ -253,22 +252,21 @@ def assign_slots_rbs(
             selection = df['flight_status'] != FS_CONTROLLED
 
         for flight_idx, flight in df[selection].sort_values('minutes_eta').iterrows():
-            free = df_slots[
-                (df_slots['slot_start_min'] >= flight['minutes_eta'])
-                & (~df_slots['occupied'])
-            ]
+            free = df_slots[(df_slots['slot_start_min'] >= flight['minutes_eta']) & (~df_slots['occupied'])]
             if not free.empty:
-                slot_idx = free.index[0]          # earliest free slot
-                df_slots.at[slot_idx, 'occupied']  = True
+                slot_idx = free.index[0]  # earliest free slot
+                df_slots.at[slot_idx, 'occupied'] = True
                 df_slots.at[slot_idx, 'flight_id'] = flight_idx
                 df_slots.at[slot_idx, 'airline'] = flight['airline']
                 df.at[flight_idx, 'assigned_slot'] = df_slots.at[slot_idx, 'slot_start_min']
 
     return df
 
+
 # =============================================================================
 # 4. DELAYS - HOW MUCH IS EACH FLIGHT DELAYED, AND WHERE DOES IT WAIT?
 # =============================================================================
+
 
 def compute_delays(df_res: pd.DataFrame) -> pd.DataFrame:
     """
@@ -301,16 +299,18 @@ def compute_delays(df_res: pd.DataFrame) -> pd.DataFrame:
     df['total_delay'] = (df['CTA'] - df['minutes_eta']).clip(lower=0)
 
     controlled_mask = df['flight_status'] == FS_CONTROLLED
-    df['air_delay']    = np.where(~controlled_mask, df['total_delay'], 0)
-    df['ground_delay'] = np.where( controlled_mask, df['total_delay'], 0)
+    df['air_delay'] = np.where(~controlled_mask, df['total_delay'], 0)
+    df['ground_delay'] = np.where(controlled_mask, df['total_delay'], 0)
     if 'minutes_etd' in df.columns:
         df['CTD'] = df['minutes_etd'] + df['ground_delay']
 
     return df
 
+
 # =============================================================================
 # 5. MINIMUM DELAY IMPOSED BY THE CAPACITY DROP
 # =============================================================================
+
 
 def newell_minimum_delay(timeline: pd.DataFrame) -> float:
     """
@@ -327,9 +327,11 @@ def newell_minimum_delay(timeline: pd.DataFrame) -> float:
     queue_per_minute = (timeline['demand_accum'] - timeline['capacity_accum']).clip(lower=0)
     return queue_per_minute.sum()
 
+
 # =============================================================================
 # 6. ECONOMIC AND ENVIRONMENTAL KPIs
 # =============================================================================
+
 
 def unrecoverable_delay(df_res: pd.DataFrame, h_cancel: float = CFG.H_START) -> pd.Series:
     """
@@ -384,12 +386,12 @@ def gdp_vs_do_nothing(df_res: pd.DataFrame, h_start: float = CFG.H_START) -> dic
     cost_gdp_value = flight_costs(df_res)['delay_cost_eur'].sum()
 
     block_time = df_res['block_time_min'].clip(lower=1)
-    air_rate = df_res['flight_co2_kg'] / block_time                   # kg CO2 / min airborne
-    ground_rate = ground_co2_kg_per_min(df_res['size_seats_avg'])              # kg CO2 / min at the gate
+    air_rate = df_res['flight_co2_kg'] / block_time  # kg CO2 / min airborne
+    ground_rate = ground_co2_kg_per_min(df_res['size_seats_avg'])  # kg CO2 / min at the gate
 
-    co2_air   = (air_rate * df_res['air_delay']).sum()
+    co2_air = (air_rate * df_res['air_delay']).sum()
     co2_ground = (ground_rate * df_res['ground_delay']).sum()
-    co2_nominal_total         = df_res['flight_co2_kg'].sum()
+    co2_nominal_total = df_res['flight_co2_kg'].sum()
 
     co2_no_gdp = co2_nominal_total + (air_rate * df_res['total_delay']).sum()
     co2_with_gdp = co2_nominal_total + co2_air + co2_ground
@@ -397,25 +399,27 @@ def gdp_vs_do_nothing(df_res: pd.DataFrame, h_start: float = CFG.H_START) -> dic
     lost_total = unrecoverable_delay(df_res, h_start).sum()
 
     return {
-        'cost_baseline':       round(cost_no_gdp, 2),
-        'cost_gdp':            round(cost_gdp_value, 2),
-        'cost_savings':        round(cost_no_gdp - cost_gdp_value, 2),
-        'co2_baseline':        round(co2_no_gdp, 2),
-        'co2_gdp':             round(co2_with_gdp, 2),
-        'co2_savings':         round(co2_no_gdp - co2_with_gdp, 2),
-        'air_delay_co2':      round(co2_air, 2),
-        'ground_delay_co2':    round(co2_ground, 2),
+        'cost_baseline': round(cost_no_gdp, 2),
+        'cost_gdp': round(cost_gdp_value, 2),
+        'cost_savings': round(cost_no_gdp - cost_gdp_value, 2),
+        'co2_baseline': round(co2_no_gdp, 2),
+        'co2_gdp': round(co2_with_gdp, 2),
+        'co2_savings': round(co2_no_gdp - co2_with_gdp, 2),
+        'air_delay_co2': round(co2_air, 2),
+        'ground_delay_co2': round(co2_ground, 2),
         'unrecoverable_delay': round(lost_total, 2),
     }
+
 
 # =============================================================================
 # 7. ORCHESTRATOR
 # =============================================================================
 
+
 def run_gdp(
     df_flights: pd.DataFrame,
     params: dict,
-    radius_km: int       = CFG.GDP_RADIUS_KM,
+    radius_km: int = CFG.GDP_RADIUS_KM,
     h_file_offset: int = CFG.H_FILE_OFFSET,
     run_compression: bool = True,
 ) -> dict:
@@ -462,17 +466,17 @@ def run_gdp(
         slot_times.append(round(t_slot, 4))
         t_slot += params['SLOT_RED'] if t_slot < params['H_END'] else params['SLOT_NOM']
 
-    df_slots = pd.DataFrame({
-        'slot_start_min': slot_times,
-        'occupied':       False,
-        'flight_id':      None,
-        'airline':        None,
-    })
+    df_slots = pd.DataFrame(
+        {
+            'slot_start_min': slot_times,
+            'occupied': False,
+            'flight_id': None,
+            'airline': None,
+        }
+    )
 
     # 4. RBS allocation of the affected flights
-    df_window = df_classified[
-        df_classified['flight_status'] != FS_NOT_AFFECTED
-    ].copy()
+    df_window = df_classified[df_classified['flight_status'] != FS_NOT_AFFECTED].copy()
     df_slots_rbs = df_slots.copy()
     df_rbs_alloc = assign_slots_rbs(df_window, df_slots_rbs)
     no_slot = df_rbs_alloc['assigned_slot'].isna()
@@ -487,6 +491,7 @@ def run_gdp(
     df_compressed, compression_summary = None, None
     if run_compression:
         from lib_compression import cancel_and_compress
+
         df_compressed, compression_summary = cancel_and_compress(df_rbs_alloc)
         df_compressed = compute_delays(df_compressed)
 
@@ -501,14 +506,15 @@ def run_gdp(
         'params': params,
     }
 
+
 # =============================================================================
 # DEBUG MODE: python src/lib_gdp_core.py
 # =============================================================================
 if __name__ == "__main__":
     import lib_data_prep as prep
 
-    base     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    p_debug  = os.path.join(base, 'debug', 'DEBUG_02_flight_status.xlsx')
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    p_debug = os.path.join(base, 'debug', 'DEBUG_02_flight_status.xlsx')
     params = CFG.to_params_dict()
 
     df_flights = prep.prepare_flights(config.traffic_file(), config.FLEET_TABLE)
@@ -522,5 +528,7 @@ if __name__ == "__main__":
 
     h_noreg = results['h_noreg']
     kpis = gdp_vs_do_nothing(df_result)
-    print(f"HNoReg {h_noreg // 60:02d}:{h_noreg % 60:02d}, "
-          f"unrecoverable delay {kpis['unrecoverable_delay']} min")
+    print(
+        f"HNoReg {h_noreg // 60:02d}:{h_noreg % 60:02d}, "
+        f"unrecoverable delay {kpis['unrecoverable_delay']} min"
+    )

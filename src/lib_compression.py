@@ -21,7 +21,7 @@ import pandas as pd
 
 from config import FS_CONTROLLED
 
-CANCEL_DELAY_THRESHOLD_MIN = 180   # "> 2 or 3 h depending on your airport": 3 h
+CANCEL_DELAY_THRESHOLD_MIN = 180  # "> 2 or 3 h depending on your airport": 3 h
 
 
 def _eligible(df: pd.DataFrame, slot: float) -> pd.DataFrame:
@@ -127,7 +127,9 @@ def cancel_and_compress(
         'unused_slots': unused,
     }
     if verbose:
-        print(f"   Cancellations: {airline} cancels {summary['cancelled_flights']} flights delayed "
-              f"> {delay_threshold:.0f} min; {by_substitution} substitutions, "
-              f"{by_compression} compression moves, {summary['delay_saved_min']:.0f} min saved")
+        print(
+            f"   Cancellations: {airline} cancels {summary['cancelled_flights']} flights delayed "
+            f"> {delay_threshold:.0f} min; {by_substitution} substitutions, "
+            f"{by_compression} compression moves, {summary['delay_saved_min']:.0f} min saved"
+        )
     return df, summary

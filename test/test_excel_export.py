@@ -27,7 +27,7 @@ PARAMS = CFG.to_params_dict()
 def pipeline(tmp_path_factory):
     out = tmp_path_factory.mktemp('run')
     df = prep.prepare_flights(config.SAMPLE_TRAFFIC, config.FLEET_TABLE)
-    res = gdp.run_gdp(df, PARAMS)                         # with compression
+    res = gdp.run_gdp(df, PARAMS)  # with compression
     rbs = res['allocation']
     ghp = run_ghp(rbs, list(res['slots']['slot_start_min']), PARAMS)
     wp4 = run_intermodal_analysis(df, res, ghp, PARAMS, str(out))
@@ -37,10 +37,17 @@ def pipeline(tmp_path_factory):
     wp5 = final_table(wp4['summary'])
     path = os.path.join(str(out), 'audit.xlsx')
     excel.export_audit_workbook(
-        df_flights_raw=df, scenario_tables=scenarios, df_dashboard=pd.DataFrame(kpis.values()),
-        df_slots=res['slots'], params=PARAMS, h_noreg=res['h_noreg'], timeline=res['timeline'],
-        newell_min_delay=gdp.newell_minimum_delay(res['timeline']), path=path,
-        df_compressed=res['compressed_allocation'], df_intermodal=wp4['summary'],
+        df_flights_raw=df,
+        scenario_tables=scenarios,
+        df_dashboard=pd.DataFrame(kpis.values()),
+        df_slots=res['slots'],
+        params=PARAMS,
+        h_noreg=res['h_noreg'],
+        timeline=res['timeline'],
+        newell_min_delay=gdp.newell_minimum_delay(res['timeline']),
+        path=path,
+        df_compressed=res['compressed_allocation'],
+        df_intermodal=wp4['summary'],
         summary_tables={'WP3_GHP_vs_GDP': wp3, 'WP4_Intermodal': wp4['summary'], 'WP5_Final_by_KPA': wp5},
     )
     return {'path': path, 'res': res, 'wp5': wp5, 'scenarios': scenarios}
@@ -48,9 +55,18 @@ def pipeline(tmp_path_factory):
 
 def test_workbook_has_every_sheet(pipeline):
     sheets = openpyxl.load_workbook(pipeline['path'], read_only=True).sheetnames
-    for expected in ['Dashboard', 'WP3_GHP_vs_GDP', 'WP4_Intermodal', 'WP5_Final_by_KPA',
-                     'Audit_GDP (RBS)', 'Audit_GHP emissions', 'Audit_GHP cost',
-                     'WP2_Cancellations', 'Parameters', 'Slots']:
+    for expected in [
+        'Dashboard',
+        'WP3_GHP_vs_GDP',
+        'WP4_Intermodal',
+        'WP5_Final_by_KPA',
+        'Audit_GDP (RBS)',
+        'Audit_GHP emissions',
+        'Audit_GHP cost',
+        'WP2_Cancellations',
+        'Parameters',
+        'Slots',
+    ]:
         assert expected in sheets
 
 
@@ -67,15 +83,15 @@ def test_compression_sheet_matches_the_compression_run(pipeline):
     summary = res['compression_summary']
     assert (table['status'] == 'Cancelled').sum() == summary['cancelled_flights'] > 0
     cancelled = table[table['status'] == 'Cancelled']
-    assert (cancelled['airline'] == summary['airline']).all()           # one airline cancels
+    assert (cancelled['airline'] == summary['airline']).all()  # one airline cancels
     assert (cancelled['delay_before'] > summary['delay_threshold_min']).all()
     moved = table[table['status'] == 'Moved earlier']
     assert len(moved) > 0
-    assert (moved['minutes_saved'] > 0).all()                     # the old sheet always reported 0
+    assert (moved['minutes_saved'] > 0).all()  # the old sheet always reported 0
     assert (moved['CTA_after'] >= moved['ETA']).all()
 
 
 def test_every_wp5_kpi_is_mapped_to_a_kpa(pipeline):
     assert 'Other' not in set(pipeline['wp5']['KPA'])
     assert {label for label, _ in SUMMARY_ROWS} <= set(KPI_TO_KPA)
-    assert len(pipeline['wp5'].columns) == 2 + 6                      # KPA, Metric + six methods
+    assert len(pipeline['wp5'].columns) == 2 + 6  # KPA, Metric + six methods

@@ -6,8 +6,8 @@
 
 import pandas as pd
 
-from cost_model import OTP_THRESHOLD_MIN, flight_costs, ground_co2_kg_per_min
 from config import FS_CONTROLLED
+from cost_model import OTP_THRESHOLD_MIN, flight_costs, ground_co2_kg_per_min
 from lib_gdp_core import unrecoverable_delay
 
 
@@ -95,34 +95,34 @@ def evaluate_scenario(df_res: pd.DataFrame, scenario_name: str, h_start_min: int
             top_airlines[f'top{idx}_rsd_pct'] = round(_rsd(df_al['total_delay'].fillna(0)), 1)
 
     kpis = {
-        'scenario':              scenario_name,
-        'flights':         n_flights,
-        'delayed_flights':      n_delayed,
-        'otp_pct':      round(otp_pct, 2),
-        'total_delay_min':      round(df['total_delay'].sum(), 2),
-        'max_delay_min':        round(df['total_delay'].max(), 2),
-        'mean_delay_min':      round(df['total_delay'].mean(), 2),
-        'air_delay_min':       round(df['air_delay'].sum(), 2),
-        'max_air_delay_min':   round(df['air_delay'].max(), 2),
+        'scenario': scenario_name,
+        'flights': n_flights,
+        'delayed_flights': n_delayed,
+        'otp_pct': round(otp_pct, 2),
+        'total_delay_min': round(df['total_delay'].sum(), 2),
+        'max_delay_min': round(df['total_delay'].max(), 2),
+        'mean_delay_min': round(df['total_delay'].mean(), 2),
+        'air_delay_min': round(df['air_delay'].sum(), 2),
+        'max_air_delay_min': round(df['air_delay'].max(), 2),
         'mean_air_delay_min': round(air_exempt.mean(), 2) if len(air_exempt) else 0.0,
         'mean_ground_delay_min': round(ground_ctrl.mean(), 2) if len(ground_ctrl) else 0.0,
-        'ground_delay_min':     round(df['ground_delay'].sum(), 2),
+        'ground_delay_min': round(df['ground_delay'].sum(), 2),
         'max_ground_delay_min': round(df['ground_delay'].max(), 2),
-        'unrecoverable_delay_min':    round(lost_total, 2),
-        'reactionary_delay_min':  round(costs['propagated_delay_min'].sum(), 2),
-        'propagating_flights':        int((costs['propagated_delay_min'] > 0).sum()),
-        'air_delay_co2_kg':      round(air_delay_co2, 2),
-        'ground_delay_co2_kg':    round(ground_delay_co2, 2),
-        'delay_co2_kg':   round(air_delay_co2 + ground_delay_co2, 2),
-        'delay_cost_total_eur':   round(cost_total, 2),
-        'primary_cost_total_eur':     round(costs['primary_cost_eur'].sum(), 2),
-        'reactionary_cost_total_eur':     round(costs['reactionary_cost_eur'].sum(), 2),
-        'delay_cost_mean_eur':   round(cost_mean, 2),
-        'delay_cost_max_eur':     round(costs['delay_cost_eur'].max(), 2),
-        'rsd_air_pct':             round(_rsd(air_exempt), 2),
-        'rsd_ground_pct':           round(_rsd(ground_ctrl), 2),
-        'rsd_total_pct':            round(_rsd(df['total_delay']), 2),
-        'airline_fairness_rsd_pct':       round(airline_rsd, 2),
+        'unrecoverable_delay_min': round(lost_total, 2),
+        'reactionary_delay_min': round(costs['propagated_delay_min'].sum(), 2),
+        'propagating_flights': int((costs['propagated_delay_min'] > 0).sum()),
+        'air_delay_co2_kg': round(air_delay_co2, 2),
+        'ground_delay_co2_kg': round(ground_delay_co2, 2),
+        'delay_co2_kg': round(air_delay_co2 + ground_delay_co2, 2),
+        'delay_cost_total_eur': round(cost_total, 2),
+        'primary_cost_total_eur': round(costs['primary_cost_eur'].sum(), 2),
+        'reactionary_cost_total_eur': round(costs['reactionary_cost_eur'].sum(), 2),
+        'delay_cost_mean_eur': round(cost_mean, 2),
+        'delay_cost_max_eur': round(costs['delay_cost_eur'].max(), 2),
+        'rsd_air_pct': round(_rsd(air_exempt), 2),
+        'rsd_ground_pct': round(_rsd(ground_ctrl), 2),
+        'rsd_total_pct': round(_rsd(df['total_delay']), 2),
+        'airline_fairness_rsd_pct': round(airline_rsd, 2),
     }
     kpis.update(top_airlines)
     return kpis
@@ -130,28 +130,28 @@ def evaluate_scenario(df_res: pd.DataFrame, scenario_name: str, h_start_min: int
 
 # Rows of the summary tables shared by WP3, WP4 and WP5.
 SUMMARY_ROWS = [
-    ('Affected flights',                 'flights'),
-    ('Delayed flights',                  'delayed_flights'),
-    ('Total delay (min)',                'total_delay_min'),
-    ('Air delay (min)',                  'air_delay_min'),
-    ('Ground delay (min)',               'ground_delay_min'),
-    ('Mean delay (min/flight)',          'mean_delay_min'),
-    ('Mean air delay per exempt flight (min)',      'mean_air_delay_min'),
+    ('Affected flights', 'flights'),
+    ('Delayed flights', 'delayed_flights'),
+    ('Total delay (min)', 'total_delay_min'),
+    ('Air delay (min)', 'air_delay_min'),
+    ('Ground delay (min)', 'ground_delay_min'),
+    ('Mean delay (min/flight)', 'mean_delay_min'),
+    ('Mean air delay per exempt flight (min)', 'mean_air_delay_min'),
     ('Mean ground delay per controlled flight (min)', 'mean_ground_delay_min'),
-    ('Max delay (min)',                  'max_delay_min'),
-    ('Max air delay (min)',              'max_air_delay_min'),
-    ('Max ground delay (min)',           'max_ground_delay_min'),
-    ('RSD of air delay, exempt flights (%)',        'rsd_air_pct'),
+    ('Max delay (min)', 'max_delay_min'),
+    ('Max air delay (min)', 'max_air_delay_min'),
+    ('Max ground delay (min)', 'max_ground_delay_min'),
+    ('RSD of air delay, exempt flights (%)', 'rsd_air_pct'),
     ('RSD of ground delay, controlled flights (%)', 'rsd_ground_pct'),
-    ('OTP, delay < 15 min (%)',          'otp_pct'),
-    ('Unrecoverable delay (min)',        'unrecoverable_delay_min'),
+    ('OTP, delay < 15 min (%)', 'otp_pct'),
+    ('Unrecoverable delay (min)', 'unrecoverable_delay_min'),
     ('Reactionary delay passed to next rotations (min)', 'reactionary_delay_min'),
-    ('Flights whose delay propagates',   'propagating_flights'),
-    ('Air delay CO2 (kg)',               'air_delay_co2_kg'),
-    ('Ground delay CO2 (kg)',            'ground_delay_co2_kg'),
-    ('Delay CO2 (kg)',                   'delay_co2_kg'),
-    ('Cost of delay (EUR)',              'delay_cost_total_eur'),
-    ('  of which reactionary (EUR)',     'reactionary_cost_total_eur'),
+    ('Flights whose delay propagates', 'propagating_flights'),
+    ('Air delay CO2 (kg)', 'air_delay_co2_kg'),
+    ('Ground delay CO2 (kg)', 'ground_delay_co2_kg'),
+    ('Delay CO2 (kg)', 'delay_co2_kg'),
+    ('Cost of delay (EUR)', 'delay_cost_total_eur'),
+    ('  of which reactionary (EUR)', 'reactionary_cost_total_eur'),
     ('Airline fairness: RSD of top-4 mean delays (%)', 'airline_fairness_rsd_pct'),
 ]
 

@@ -15,6 +15,7 @@ import shutil
 import sys
 
 import matplotlib
+
 matplotlib.use('Agg')
 import matplotlib.figure as mfig  # noqa: E402
 
@@ -33,13 +34,13 @@ WANTED = {
 
 def main() -> None:
     import config
-    import lib_wp4_figures as gw
     import lib_comparison as comp
     import lib_data_prep as prep
     import lib_gdp_core as gdp
     import lib_ghp_solver as ghp
     import lib_intermodal as inter
     import lib_visualization as vis
+    import lib_wp4_figures as gw
     from config import CFG
 
     os.makedirs(OUT, exist_ok=True)
@@ -55,6 +56,7 @@ def main() -> None:
 
     mfig.Figure.savefig = savefig
     import matplotlib.pyplot as plt
+
     plt_savefig = plt.savefig
     plt.savefig = lambda fname, *a, **k: savefig(plt.gcf(), fname, *a, **k)
     try:
@@ -66,8 +68,9 @@ def main() -> None:
             res_ghp = ghp.run_ghp(rbs, list(res['slots']['slot_start_min']), params)
             wp4 = inter.run_intermodal_analysis(df, res, res_ghp, params, tmp)
         vis.plot_newell(res['timeline'], params, res['h_noreg'], '1_newell_curves.svg')
-        ghp.plot_wp3_figures({'GDP': rbs, 'GHP_Emissions': res_ghp['GHP_Emissions'],
-                                  'GHP_Cost': res_ghp['GHP_Cost']}, tmp)
+        ghp.plot_wp3_figures(
+            {'GDP': rbs, 'GHP_Emissions': res_ghp['GHP_Emissions'], 'GHP_Cost': res_ghp['GHP_Cost']}, tmp
+        )
         gw.plot_wp4_figures(res, wp4, tmp)
         comp.plot_final(wp4['kpis'], tmp)
     finally:
