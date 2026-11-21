@@ -16,36 +16,41 @@
 #   real passengers (seats x European load factor) / Cook base passengers, so
 #   the mapping captures the operating category (narrow-body, wide-body,
 #   turboprop, business jet) rather than the exact seat count.
-# - Fixed Electrical Ground Power (FEGP) demand per RECAT category and the
-#   Spanish grid emission factor, for CO2 emitted while holding on the ground.
+# - APU fuel flow at the gate (ICAO Doc 9889), for the CO2 of ground delay.
 # =============================================================================
 
 import numpy as np
 import pandas as pd
 
-# Electrical demand on FEGP per RECAT category (kW)
-FEGP_KW_PER_RECAT = {
-    'A': 288.0,  # A388: 4 x 90 kVA (360 kVA * 0.8 = 288 kW)
-    'B': 144.0,  # B789: 2 x 90 kVA (180 kVA * 0.8 = 144 kW)
-    'C': 144.0,  # B764: 2 x 90 kVA (180 kVA * 0.8 = 144 kW)
-    'D': 72.0,   # A320: 1 x 90 kVA (90 kVA * 0.8 = 72 kW)
-    'E': 32.0,   # E190: internal bus limit (40 kVA * 0.8 = 32 kW)
-    'F': 12.8,   # PC24: 28.5 VDC * 450 Amperios continuos = 12.8 kW
-}
+# CO2 of ground delay (WP2 statement: "look for references for fuel
+# consumption at gate ... one value for each aircraft category", 1 kg of fuel
+# = 3.16 kg of CO2). A flight held at its origin gate keeps its auxiliary
+# power unit (APU) running for air conditioning and power. APU fuel flow in
+# normal running (maximum environmental control system load) by seat group:
+# ICAO Doc 9889, Airport Air Quality Manual, 2nd ed., Table 3-A1-6.
+# Where the table separates older and newer types, the newer value is used.
+APU_FUEL_KG_PER_H = (
+    (100, 101.0),           # business and regional jets (seats < 100)
+    (200, 110.0),           # 100 <= seats < 200, newer types
+    (300, 164.0),           # 200 <= seats < 300
+    (float('inf'), 238.0),  # seats >= 300, newer types
+)
+CO2_PER_KG_FUEL = 3.16      # IATA Carbon Offset Programme (statement)
+DEFAULT_SEATS = 180
 
-# Emission factor of the Spanish electricity grid (kg CO2 / kWh)
-# Source: Red Eléctrica de España (REE) / MITERD, 2023
-GRID_EMISSION_FACTOR_KG_KWH = 0.283
+
+def apu_fuel_kg_per_h(seats) -> np.ndarray:
+    """APU fuel flow (kg/h) for an array of seat counts (NaN -> 180 seats)."""
+    s = np.nan_to_num(np.asarray(seats, dtype=float), nan=DEFAULT_SEATS)
+    limits = np.array([lim for lim, _ in APU_FUEL_KG_PER_H])
+    flows = np.array([flow for _, flow in APU_FUEL_KG_PER_H])
+    return flows[np.searchsorted(limits, s, side='right')]
 
 
-def co2_tierra_kg_por_min(recat) -> float:
-    """kg of CO2 per minute for an aircraft held at the gate on FEGP.
+def ground_co2_kg_per_min(seats) -> np.ndarray:
+    """kg of CO2 per minute of ground delay (APU at the origin gate)."""
+    return apu_fuel_kg_per_h(seats) / 60.0 * CO2_PER_KG_FUEL
 
-    Unknown or missing RECAT categories fall back to D (A320 family).
-    """
-    clave = str(recat).upper() if isinstance(recat, str) else 'D'
-    potencia_kw = FEGP_KW_PER_RECAT.get(clave, FEGP_KW_PER_RECAT['D'])
-    return potencia_kw / 60.0 * GRID_EMISSION_FACTOR_KG_KWH
 
 # On-time performance threshold: a flight is on time when its delay is below
 # 15 min (EUROCONTROL CODA / IATA convention).
@@ -60,7 +65,7 @@ OTP_THRESHOLD_MIN = 15
 #   wide-body (RECAT A-C): 80 min, the value of the delivered project.
 MIN_TURNAROUND_MIN = {'narrow': 35, 'wide': 80}
 
-# Cost bases (see coste_vuelo_vec). 'rotation' is the model used for every
+# Cost bases (see flight_cost). 'rotation' is the model used for every
 # result; 'primary' and 'full' bound it from below and above (sensitivity).
 COST_BASES = ('primary', 'rotation', 'full')
 DEFAULT_COST_BASE = 'rotation'
@@ -83,7 +88,7 @@ LOAD_FACTOR_EU = 0.837
 # ICAO TYPE -> COOK & TANNER REFERENCE TYPE (v4.1, 2014)
 #
 # Principle: pick the Cook type whose cost structure (fuel, crew, maintenance,
-# passengers) is closest to the real aircraft. factor_pasajeros() then corrects
+# passengers) is closest to the real aircraft. passenger_factor() then corrects
 # the difference in capacity, so the mapping has to capture the operating
 # category (narrow-body, wide-body, turboprop, business jet), not just the
 # seat count.
@@ -259,7 +264,7 @@ _COOK_TACTICAL = {
 _DELAY_BREAKPOINTS = [5, 15, 30, 60, 90, 120, 180, 240, 300]
 
 
-def _mapear_tipo_cook(tipo_icao: str, recat: str, seats: int = 0) -> str:
+def _cook_type(icao_type: str, recat: str, seats: int = 0) -> str:
     """
     Closest Cook & Tanner v4.1 reference type for an ICAO aircraft type.
 
@@ -271,9 +276,9 @@ def _mapear_tipo_cook(tipo_icao: str, recat: str, seats: int = 0) -> str:
          - RECAT E     (regional):    E190 if seats > 80, AT72 if > 55, else AT43
          - RECAT F     (light):       AT43 (with a very low passenger factor)
     """
-    tipo_upper = str(tipo_icao).upper().strip()
-    if tipo_upper in _FLEET_TO_COOK:
-        return _FLEET_TO_COOK[tipo_upper]
+    icao_upper = str(icao_type).upper().strip()
+    if icao_upper in _FLEET_TO_COOK:
+        return _FLEET_TO_COOK[icao_upper]
 
     recat_upper = str(recat).upper()
     if recat_upper in ('A', 'B', 'C'):
@@ -304,28 +309,28 @@ def _mapear_tipo_cook(tipo_icao: str, recat: str, seats: int = 0) -> str:
 # COST CURVES
 # =============================================================================
 
-def _curva(tipo_cook: str, fase: str, alcance: str, delays) -> 'np.ndarray':
+def _curve(cook_type: str, phase: str, scope: str, delays) -> 'np.ndarray':
     """Cook & Tanner cost (EUR per flight, Cook base load) for an array of delays.
 
     Linear interpolation between the breakpoints, from 0 EUR at 0 min. Beyond
     300 min the last segment is extended, so extra delay is never free.
     """
     d = np.clip(np.asarray(delays, dtype=float), 0, None)
-    tabla = _COOK_TACTICAL[(fase, alcance)]
+    table = _COOK_TACTICAL[(phase, scope)]
     x = np.array([0] + _DELAY_BREAKPOINTS, dtype=float)
-    y = np.array([0] + tabla.get(tipo_cook, tabla['A320']), dtype=float)
+    y = np.array([0] + table.get(cook_type, table['A320']), dtype=float)
     out = np.interp(d, x, y)
-    mas_alla = d > x[-1]
-    out[mas_alla] = y[-1] + (y[-1] - y[-2]) / (x[-1] - x[-2]) * (d[mas_alla] - x[-1])
+    beyond = d > x[-1]
+    out[beyond] = y[-1] + (y[-1] - y[-2]) / (x[-1] - x[-2]) * (d[beyond] - x[-1])
     return out
 
 
-def coste_primario_vec(tipo_cook: str, delays, fase: str = 'at_gate') -> 'np.ndarray':
+def primary_cost(cook_type: str, delays, phase: str = 'at_gate') -> 'np.ndarray':
     """Primary tactical cost (Tables 22/24): the delayed flight's own costs."""
-    return _curva(tipo_cook, fase, 'primary', delays)
+    return _curve(cook_type, phase, 'primary', delays)
 
 
-def coste_reactivo_vec(tipo_cook: str, delays) -> 'np.ndarray':
+def reactionary_cost(cook_type: str, delays) -> 'np.ndarray':
     """Reactionary cost of a delay passed on to the next rotation.
 
     Cook & Tanner full minus primary at-gate cost (Table 26 - Table 22). At
@@ -337,24 +342,24 @@ def coste_reactivo_vec(tipo_cook: str, delays) -> 'np.ndarray':
     x = np.array([0] + _DELAY_BREAKPOINTS, dtype=float)
     full = _COOK_TACTICAL[('at_gate', 'full')]
     prim = _COOK_TACTICAL[('at_gate', 'primary')]
-    y = np.array([0] + full.get(tipo_cook, full['A320']), dtype=float) \
-        - np.array([0] + prim.get(tipo_cook, prim['A320']), dtype=float)
+    y = np.array([0] + full.get(cook_type, full['A320']), dtype=float) \
+        - np.array([0] + prim.get(cook_type, prim['A320']), dtype=float)
     y = np.maximum.accumulate(np.clip(y, 0, None))
     out = np.interp(d, x, y)
-    mas_alla = d > x[-1]
-    out[mas_alla] = y[-1] + (y[-1] - y[-2]) / (x[-1] - x[-2]) * (d[mas_alla] - x[-1])
+    beyond = d > x[-1]
+    out[beyond] = y[-1] + (y[-1] - y[-2]) / (x[-1] - x[-2]) * (d[beyond] - x[-1])
     return out
 
 
-def retraso_propagado(delay, holgura) -> 'np.ndarray':
+def propagated_delay(delay, buffer) -> 'np.ndarray':
     """Delay passed on to the next departure of the same aircraft.
 
-    holgura: turnaround buffer (scheduled ground time - minimum turnaround
+    buffer: turnaround buffer (scheduled ground time - minimum turnaround
     time, >= 0). NaN means no later departure of this aircraft from LEBL that
     day (night stop): nothing propagates.
     """
     d = np.asarray(delay, dtype=float)
-    h = np.asarray(holgura, dtype=float)
+    h = np.asarray(buffer, dtype=float)
     return np.where(np.isnan(h), 0.0, np.clip(d - np.nan_to_num(h), 0, None))
 
 
@@ -362,12 +367,12 @@ def retraso_propagado(delay, holgura) -> 'np.ndarray':
 # COST OF DELAY OF A FLIGHT
 # =============================================================================
 
-def coste_vuelo_vec(
-    tipo_cook: str,
-    factor_pax: float,
+def flight_cost(
+    cook_type: str,
+    pax_factor: float,
     ground_delay,
     air_delay=0.0,
-    holgura=np.nan,
+    buffer=np.nan,
     base: str = DEFAULT_COST_BASE,
 ) -> 'np.ndarray':
     """
@@ -383,53 +388,53 @@ def coste_vuelo_vec(
         'full'    : primary + R(delay), Cook & Tanner's network average, which
                     assumes an average buffer (upper bound here).
 
-    All terms are scaled by factor_pax (real passengers / Cook base load).
+    All terms are scaled by pax_factor (real passengers / Cook base load).
     """
     if base not in COST_BASES:
         raise ValueError(f"base must be one of {COST_BASES}")
     g = np.clip(np.asarray(ground_delay, dtype=float), 0, None)
     a = np.clip(np.broadcast_to(np.asarray(air_delay, dtype=float), g.shape), 0, None)
-    coste = coste_primario_vec(tipo_cook, g, 'at_gate') + coste_primario_vec(tipo_cook, a, 'en_route')
+    cost = primary_cost(cook_type, g, 'at_gate') + primary_cost(cook_type, a, 'en_route')
     if base == 'full':
-        coste = coste + coste_reactivo_vec(tipo_cook, g + a)
+        cost = cost + reactionary_cost(cook_type, g + a)
     elif base == 'rotation':
-        coste = coste + coste_reactivo_vec(tipo_cook, retraso_propagado(g + a, holgura))
-    return coste * factor_pax
+        cost = cost + reactionary_cost(cook_type, propagated_delay(g + a, buffer))
+    return cost * pax_factor
 
 
-def factor_pasajeros(tipo_cook: str, asientos) -> float:
+def passenger_factor(cook_type: str, seats) -> float:
     """Real passengers (seats x European load factor) / Cook base passengers."""
     try:
-        asientos = float(asientos)
+        seats = float(seats)
     except (TypeError, ValueError):
-        asientos = 180.0
-    if not asientos > 0:
-        asientos = 180.0
-    pax_reales = max(int(asientos * LOAD_FACTOR_EU), 1)
-    return pax_reales / _PAX_BASE_TABLE.get(tipo_cook, 130)
+        seats = 180.0
+    if not seats > 0:
+        seats = 180.0
+    real_pax = max(int(seats * LOAD_FACTOR_EU), 1)
+    return real_pax / _PAX_BASE_TABLE.get(cook_type, 130)
 
 
-def _tipo_y_factor(fila) -> tuple[str, float]:
-    asientos = fila.get('size_seats_avg', 180)
-    asientos = 180 if pd.isna(asientos) else asientos
-    tipo = _mapear_tipo_cook(fila.get('ATYP', ''), fila.get('recat', 'D'), int(asientos))
-    return tipo, factor_pasajeros(tipo, asientos)
+def _cook_type_and_factor(row) -> tuple[str, float]:
+    seats = row.get('size_seats_avg', 180)
+    seats = 180 if pd.isna(seats) else seats
+    cook_type = _cook_type(row.get('ATYP', ''), row.get('recat', 'D'), int(seats))
+    return cook_type, passenger_factor(cook_type, seats)
 
 
-def holgura_rotacion(df: pd.DataFrame, mtt_extra: float = 0.0) -> pd.Series:
+def turnaround_buffer(df: pd.DataFrame, mtt_extra: float = 0.0) -> pd.Series:
     """Turnaround buffer of each arrival: scheduled ground time - MTT (>= 0).
 
     NaN when the aircraft has no later departure from LEBL that day.
     mtt_extra shifts the minimum turnaround times (sensitivity analysis).
     """
-    if 'tat_programado_min' not in df.columns:
+    if 'scheduled_turnaround_min' not in df.columns:
         return pd.Series(np.nan, index=df.index)
-    ancho = df.get('recat', pd.Series('D', index=df.index)).isin(['A', 'B', 'C'])
-    mtt = np.where(ancho, MIN_TURNAROUND_MIN['wide'], MIN_TURNAROUND_MIN['narrow']) + mtt_extra
-    return (df['tat_programado_min'] - mtt).clip(lower=0)
+    wide = df.get('recat', pd.Series('D', index=df.index)).isin(['A', 'B', 'C'])
+    mtt = np.where(wide, MIN_TURNAROUND_MIN['wide'], MIN_TURNAROUND_MIN['narrow']) + mtt_extra
+    return (df['scheduled_turnaround_min'] - mtt).clip(lower=0)
 
 
-def costes_por_vuelo(
+def flight_costs(
     df: pd.DataFrame,
     ground_col: str = 'ground_delay',
     air_col: str = 'air_delay',
@@ -439,29 +444,29 @@ def costes_por_vuelo(
     """Cost of delay of every flight of a scenario.
 
     Returns a DataFrame (same index) with:
-        coste_primario_eur, coste_reactivo_eur, coste_retraso_eur (their sum)
-        retraso_propagado_min (delay passed on to the next rotation)
+        primary_cost_eur, reactionary_cost_eur, delay_cost_eur (their sum)
+        propagated_delay_min (delay passed on to the next rotation)
     """
     n = len(df)
-    def _col(nombre):
-        if nombre in df.columns:
-            return df[nombre].fillna(0).to_numpy(dtype=float)
+    def _col(name):
+        if name in df.columns:
+            return df[name].fillna(0).to_numpy(dtype=float)
         return np.zeros(n)
     g, a = _col(ground_col), _col(air_col)
-    holgura = holgura_rotacion(df, mtt_extra).to_numpy(dtype=float)
-    tipos, fpax = map(np.array, zip(*(_tipo_y_factor(f) for _, f in df.iterrows()))) if n else ([], [])
+    buffer = turnaround_buffer(df, mtt_extra).to_numpy(dtype=float)
+    cook_types, fpax = map(np.array, zip(*(_cook_type_and_factor(f) for _, f in df.iterrows()))) if n else ([], [])
 
     prim, total = np.zeros(n), np.zeros(n)
-    for tipo in np.unique(tipos):
-        m = tipos == tipo
-        prim[m] = coste_vuelo_vec(tipo, fpax[m].astype(float), g[m], a[m], base='primary')
-        total[m] = coste_vuelo_vec(tipo, fpax[m].astype(float), g[m], a[m], holgura[m], base)
+    for cook_type in np.unique(cook_types):
+        m = cook_types == cook_type
+        prim[m] = flight_cost(cook_type, fpax[m].astype(float), g[m], a[m], base='primary')
+        total[m] = flight_cost(cook_type, fpax[m].astype(float), g[m], a[m], buffer[m], base)
     if base == 'rotation':
-        prop = retraso_propagado(g + a, holgura)
+        prop = propagated_delay(g + a, buffer)
     elif base == 'full':
         prop = g + a
     else:
         prop = np.zeros(n)
-    return pd.DataFrame({'coste_primario_eur': prim, 'coste_reactivo_eur': total - prim,
-                         'coste_retraso_eur': total, 'retraso_propagado_min': prop},
+    return pd.DataFrame({'primary_cost_eur': prim, 'reactionary_cost_eur': total - prim,
+                         'delay_cost_eur': total, 'propagated_delay_min': prop},
                         index=df.index)

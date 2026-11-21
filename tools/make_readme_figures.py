@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.join(ROOT, 'src'))
 OUT = os.path.join(ROOT, 'docs', 'figures')
 
 WANTED = {
-    '1_diagrama_newell.svg': 'newell_curves.png',
+    '1_newell_curves.svg': 'newell_curves.png',
     'fig3_fairness_by_airline.svg': 'wp3_fairness_by_airline.png',
     'fig2_cost_of_delay_curves.svg': 'wp3_cost_of_delay_curves.png',
     'fig3_queue_newell.svg': 'wp4_queue_newell.png',
@@ -33,7 +33,7 @@ WANTED = {
 
 def main() -> None:
     import config
-    import generar_graficos_wp4 as gw
+    import lib_wp4_figures as gw
     import lib_comparison as comp
     import lib_data_prep as prep
     import lib_gdp_core as gdp
@@ -60,16 +60,16 @@ def main() -> None:
     try:
         params = CFG.to_params_dict()
         with contextlib.redirect_stdout(io.StringIO()):
-            df = prep.preparar_vuelos(config.traffic_file(), config.FLEET_TABLE)
-            res = gdp.ejecutar_nucleo_gdp(df, params, run_compression=False)
-            rbs = res['vuelos_asignados']
-            res_ghp = ghp.ejecutar_ghp_completo(rbs, list(res['slots']['slot_start_min']), params)
-            wp4 = inter.ejecutar_analisis_intermodal(df, res, res_ghp, params, tmp)
-        vis.plot_newell(res['timeline'], params, res['h_noreg'], '1_diagrama_newell.svg')
-        ghp.generar_graficas_wp3({'GDP': rbs, 'GHP_Emissions': res_ghp['GHP_Emissions'],
+            df = prep.prepare_flights(config.traffic_file(), config.FLEET_TABLE)
+            res = gdp.run_gdp(df, params, run_compression=False)
+            rbs = res['allocation']
+            res_ghp = ghp.run_ghp(rbs, list(res['slots']['slot_start_min']), params)
+            wp4 = inter.run_intermodal_analysis(df, res, res_ghp, params, tmp)
+        vis.plot_newell(res['timeline'], params, res['h_noreg'], '1_newell_curves.svg')
+        ghp.plot_wp3_figures({'GDP': rbs, 'GHP_Emissions': res_ghp['GHP_Emissions'],
                                   'GHP_Cost': res_ghp['GHP_Cost']}, tmp)
-        gw.generar_graficas_wp4(res, wp4, tmp)
-        comp.grafica_final(wp4['kpis'], tmp)
+        gw.plot_wp4_figures(res, wp4, tmp)
+        comp.plot_final(wp4['kpis'], tmp)
     finally:
         mfig.Figure.savefig = original
         plt.savefig = plt_savefig

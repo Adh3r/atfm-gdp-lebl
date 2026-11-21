@@ -11,7 +11,7 @@ import pandas as pd
 
 # KPI row of the summary tables -> SESAR KPA (PJ19.04 performance framework,
 # ICAO KPAs refined by SESAR). Security is not assessed by this model.
-KPA_POR_KPI = {
+KPI_TO_KPA = {
     'Affected flights':                                 'Capacity',
     'HNoReg (min UTC)':                                 'Capacity',
     'Delayed flights':                                  'Operational efficiency',
@@ -22,6 +22,13 @@ KPA_POR_KPI = {
     'OTP, delay < 15 min (%)':                          'Predictability',
     'Max delay (min)':                                  'Predictability',
     'Max air delay (min)':                              'Safety (airborne holding exposure)',
+    'Mean air delay per exempt flight (min)':           'Operational efficiency',
+    'Mean ground delay per controlled flight (min)':    'Operational efficiency',
+    'Max ground delay (min)':                           'Predictability',
+    'RSD of air delay, exempt flights (%)':             'Predictability',
+    'RSD of ground delay, controlled flights (%)':      'Predictability',
+    'Air delay CO2 (kg)':                               'Environment',
+    'Ground delay CO2 (kg)':                            'Environment',
     'Unrecoverable delay (min)':                        'Flexibility',
     'Reactionary delay passed to next rotations (min)': 'Predictability',
     'Flights whose delay propagates':                   'Predictability',
@@ -36,41 +43,41 @@ KPA_POR_KPI = {
 }
 
 
-def tabla_final(df_wp4: pd.DataFrame) -> pd.DataFrame:
+def final_table(df_wp4: pd.DataFrame) -> pd.DataFrame:
     """WP4 six-scenario table with a KPA column, sorted by KPA."""
     df = df_wp4.copy()
-    df.insert(0, 'KPA', df['Metric'].map(KPA_POR_KPI).fillna('Other'))
-    orden = ['Capacity', 'Operational efficiency', 'Predictability', 'Flexibility',
+    df.insert(0, 'KPA', df['Metric'].map(KPI_TO_KPA).fillna('Other'))
+    order = ['Capacity', 'Operational efficiency', 'Predictability', 'Flexibility',
              'Safety (airborne holding exposure)', 'Environment', 'Cost effectiveness',
              'Access and equity', 'Other']
-    df['_o'] = df['KPA'].map({k: i for i, k in enumerate(orden)})
+    df['_o'] = df['KPA'].map({k: i for i, k in enumerate(order)})
     return df.sort_values(['_o'], kind='stable').drop(columns='_o').reset_index(drop=True)
 
 
-def grafica_final(kpis: dict, out_dir: str) -> str:
+def plot_final(kpis: dict, out_dir: str) -> str:
     """Cost of delay and delay CO2 of the six methods (WP5 minimum content)."""
     import matplotlib.pyplot as plt
     import numpy as np
 
     os.makedirs(out_dir, exist_ok=True)
-    metodos = ['GDP (RBS)', 'GHP emissions', 'GHP cost']
-    base = [kpis[m] for m in metodos]
-    inter = [kpis[f'Intermodal {m}'] for m in metodos]
-    x = np.arange(len(metodos))
+    methods = ['GDP (RBS)', 'GHP emissions', 'GHP cost']
+    base = [kpis[m] for m in methods]
+    inter = [kpis[f'Intermodal {m}'] for m in methods]
+    x = np.arange(len(methods))
     w = 0.38
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
-    for ax, clave, escala, unidad in ((axes[0], 'Coste_Cook_Total_EUR', 1e6, 'Cost of delay (M€)'),
-                                      (axes[1], 'CO2_Total_Retraso_kg', 1e3, 'Delay CO₂ (t)')):
-        b = [k[clave] / escala for k in base]
-        i = [k[clave] / escala for k in inter]
+    for ax, key, scale, unit in ((axes[0], 'delay_cost_total_eur', 1e6, 'Cost of delay (M€)'),
+                                      (axes[1], 'delay_co2_kg', 1e3, 'Delay CO₂ (t)')):
+        b = [k[key] / scale for k in base]
+        i = [k[key] / scale for k in inter]
         ax.bar(x - w / 2, b, w, label='Full demand', color='#4A6FA5')
         ax.bar(x + w / 2, i, w, label='With rail substitution', color='#2ECC71')
         for xs, vals in ((x - w / 2, b), (x + w / 2, i)):
             for xx, v in zip(xs, vals):
-                ax.text(xx, v, f'{v:.2f}' if escala == 1e6 else f'{v:.1f}', ha='center', va='bottom', fontsize=9)
+                ax.text(xx, v, f'{v:.2f}' if scale == 1e6 else f'{v:.1f}', ha='center', va='bottom', fontsize=9)
         ax.set_xticks(x)
-        ax.set_xticklabels(metodos)
-        ax.set_ylabel(unidad)
+        ax.set_xticklabels(methods)
+        ax.set_ylabel(unit)
         ax.set_ylim(0, max(b + i) * 1.15)
         ax.grid(axis='y', alpha=0.3, linestyle='--')
     axes[0].set_title('Cost of delay')
@@ -78,7 +85,7 @@ def grafica_final(kpis: dict, out_dir: str) -> str:
     axes[0].legend(loc='upper right')
     fig.suptitle('LEBL, 10 Aug 2025, LVP 06:00-13:00 UTC: comparison of ATFM methods')
     fig.tight_layout()
-    ruta = os.path.join(out_dir, 'wp5_cost_and_co2_by_method.svg')
-    fig.savefig(ruta, format='svg')
+    path = os.path.join(out_dir, 'wp5_cost_and_co2_by_method.svg')
+    fig.savefig(path, format='svg')
     plt.close(fig)
-    return ruta
+    return path

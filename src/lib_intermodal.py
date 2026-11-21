@@ -21,120 +21,120 @@ import os
 import pandas as pd
 
 import lib_gdp_core as gdp
-from lib_ghp_solver import ejecutar_ghp_completo
-from lib_metrics import evaluar_escenario, resumen_escenarios
+from lib_ghp_solver import run_ghp
+from lib_metrics import evaluate_scenario, summary_table
 
 # --- PARAMETERS ---
-DISTANCIA_MAX_INTERMODAL_KM = 500      # great-circle distance limit for substitution
-VELOCIDAD_HSR_KMH = 200                # fallback rail speed (route not in the table)
-TIEMPO_ACCESO_AEROPUERTO_MIN = 90      # to the airport + procedures
-TIEMPO_EGRESO_AEROPUERTO_MIN = 60      # from the airport to the destination
-TIEMPO_ACCESO_ESTACION_MIN = 40
-TIEMPO_EGRESO_ESTACION_MIN = 20
-VELOCIDAD_CRUCERO_KT = 440             # air in-vehicle time estimate
+MAX_RAIL_DISTANCE_KM = 500      # great-circle distance limit for substitution
+HSR_SPEED_KMH = 200                # fallback rail speed (route not in the table)
+AIRPORT_ACCESS_MIN = 90      # to the airport + procedures
+AIRPORT_EGRESS_MIN = 60      # from the airport to the destination
+STATION_ACCESS_MIN = 40
+STATION_EGRESS_MIN = 20
+CRUISE_SPEED_KT = 440             # air in-vehicle time estimate
 KT_TO_KMH = 1.852
-LOAD_FACTOR_POR_DEFECTO = 0.837        # IATA, Europe 2025
-ASIENTOS_POR_DEFECTO = 180
+LOAD_FACTOR = 0.837        # IATA, Europe 2025
+DEFAULT_SEATS = 180
 
 # Direct HSR services to Barcelona (travel time in hours).
-DESTINOS_HSR_DESDE_LEBL = {
-    'LEMD': {'ciudad': 'Madrid',    'tiempo_tren_h': 3.1},
-    'LEVC': {'ciudad': 'Valencia',  'tiempo_tren_h': 3.0},
-    'LEZG': {'ciudad': 'Zaragoza',  'tiempo_tren_h': 1.5},
-    'LFBO': {'ciudad': 'Toulouse',  'tiempo_tren_h': 4.0},
-    'LEAL': {'ciudad': 'Alicante',  'tiempo_tren_h': 5.2},
-    'LFML': {'ciudad': 'Marsella',  'tiempo_tren_h': 4.8},
-    'LFLL': {'ciudad': 'Lyon',      'tiempo_tren_h': 5.0},
+HSR_ROUTES = {
+    'LEMD': {'city': 'Madrid',    'rail_time_h': 3.1},
+    'LEVC': {'city': 'Valencia',  'rail_time_h': 3.0},
+    'LEZG': {'city': 'Zaragoza',  'rail_time_h': 1.5},
+    'LFBO': {'city': 'Toulouse',  'rail_time_h': 4.0},
+    'LEAL': {'city': 'Alicante',  'rail_time_h': 5.2},
+    'LFML': {'city': 'Marseille',  'rail_time_h': 4.8},
+    'LFLL': {'city': 'Lyon',      'rail_time_h': 5.0},
 }
 
 # Rail CO2 per passenger, kg (EcoPassenger).
-FACTORES_CO2_TREN_KG_PAX = {
+RAIL_CO2_KG_PER_PAX = {
     'LEMD': 19.0, 'LEVC': 10.7, 'LEAL': 15.5, 'LEZG': 8.3,
     'LFML': 7.3,  'LFBO': 6.4,  'LFLL': 7.9,
 }
 
 
-def _pasajeros(fila) -> int:
-    asientos = fila.get('size_seats_avg', ASIENTOS_POR_DEFECTO)
-    asientos = ASIENTOS_POR_DEFECTO if pd.isna(asientos) else asientos
-    return int(asientos * LOAD_FACTOR_POR_DEFECTO)
+def _passengers(row) -> int:
+    seats = row.get('size_seats_avg', DEFAULT_SEATS)
+    seats = DEFAULT_SEATS if pd.isna(seats) else seats
+    return int(seats * LOAD_FACTOR)
 
 
-def identificar_vuelos_substituibles(df_vuelos: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
+def flag_rail_replaceable(df_flights: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
     """Flag the arrivals with a direct HSR alternative within the distance limit."""
-    df = df_vuelos.copy()
-    df['es_substituible'] = (
-        (df['distancia_km'] <= DISTANCIA_MAX_INTERMODAL_KM)
-        & df['ADEP'].isin(DESTINOS_HSR_DESDE_LEBL.keys())
+    df = df_flights.copy()
+    df['rail_replaceable'] = (
+        (df['distance_km'] <= MAX_RAIL_DISTANCE_KM)
+        & df['ADEP'].isin(HSR_ROUTES.keys())
         & (df['ADES'] == 'LEBL')
     )
     if verbose:
-        n = int(df['es_substituible'].sum())
+        n = int(df['rail_replaceable'].sum())
         pct = n / len(df) * 100 if len(df) else 0
         print(f"\n   Intermodal: {n} rail-replaceable flights ({pct:.1f}% of {len(df)})")
     return df
 
 
-def calcular_tiempo_d2d(distancia_km: float, origen_icao: str, es_avion: bool = True) -> float:
+def door_to_door_min(distance_km: float, origin_icao: str, by_air: bool = True) -> float:
     """Door-to-door time in minutes, without delay."""
-    if es_avion:
-        tiempo_vuelo_h = distancia_km / (VELOCIDAD_CRUCERO_KT * KT_TO_KMH)
-        return TIEMPO_ACCESO_AEROPUERTO_MIN + tiempo_vuelo_h * 60 + TIEMPO_EGRESO_AEROPUERTO_MIN
-    tiempo_tren_h = DESTINOS_HSR_DESDE_LEBL.get(origen_icao, {}).get(
-        'tiempo_tren_h', distancia_km / VELOCIDAD_HSR_KMH)
-    return TIEMPO_ACCESO_ESTACION_MIN + tiempo_tren_h * 60 + TIEMPO_EGRESO_ESTACION_MIN
+    if by_air:
+        flight_time_h = distance_km / (CRUISE_SPEED_KT * KT_TO_KMH)
+        return AIRPORT_ACCESS_MIN + flight_time_h * 60 + AIRPORT_EGRESS_MIN
+    rail_time_h = HSR_ROUTES.get(origin_icao, {}).get(
+        'rail_time_h', distance_km / HSR_SPEED_KMH)
+    return STATION_ACCESS_MIN + rail_time_h * 60 + STATION_EGRESS_MIN
 
 
-def calcular_emision_tren(distancia_km: float, origen_icao: str, n_pasajeros: int) -> float:
+def rail_co2_kg(distance_km: float, origin_icao: str, n_passengers: int) -> float:
     """Rail CO2 (kg) for n passengers; generic per-km factor when the route is not tabulated."""
-    factor_kg_pax = FACTORES_CO2_TREN_KG_PAX.get(origen_icao)
-    if factor_kg_pax is not None:
-        return factor_kg_pax * n_pasajeros
-    factor_g_pax_km = 15.0 if origen_icao.startswith('LE') else 20.0
-    return distancia_km * n_pasajeros * factor_g_pax_km / 1000
+    kg_per_pax = RAIL_CO2_KG_PER_PAX.get(origin_icao)
+    if kg_per_pax is not None:
+        return kg_per_pax * n_passengers
+    g_per_pax_km = 15.0 if origin_icao.startswith('LE') else 20.0
+    return distance_km * n_passengers * g_per_pax_km / 1000
 
 
-def generar_comparativa_modal(df_sustituidos: pd.DataFrame) -> pd.DataFrame:
+def modal_comparison(df_replaced: pd.DataFrame) -> pd.DataFrame:
     """Air vs rail D2D time and CO2 for each replaced flight (air with its GDP delay)."""
-    filas = []
-    for _, vuelo in df_sustituidos.iterrows():
-        distancia, origen = vuelo['distancia_km'], vuelo['ADEP']
-        n_pax = _pasajeros(vuelo)
-        retraso = vuelo.get('total_delay', 0)
-        t_avion = calcular_tiempo_d2d(distancia, origen, es_avion=True)
-        t_tren = calcular_tiempo_d2d(distancia, origen, es_avion=False)
-        co2_avion = vuelo.get('co2_kg_vuelo', 0)
-        co2_tren = calcular_emision_tren(distancia, origen, n_pax)
-        filas.append({
-            'ARCID': vuelo.get('ARCID', 'N/A'),
-            'ADEP': origen,
-            'distancia_km': round(distancia, 1),
-            'pasajeros': n_pax,
-            'retraso_ATFM_min': round(retraso, 1),
-            'tiempo_d2d_avion_NOMINAL_min': round(t_avion, 1),
-            'tiempo_d2d_avion_CON_RETRASO_min': round(t_avion + retraso, 1),
-            'tiempo_d2d_tren_min': round(t_tren, 1),
-            'ahorro_tiempo_TREN_min': round(t_avion + retraso - t_tren, 1),
-            'co2_avion_kg': round(co2_avion, 1),
-            'co2_tren_kg': round(co2_tren, 1),
-            'ahorro_co2_neto_kg': round(co2_avion - co2_tren, 1),
+    rows = []
+    for _, flight in df_replaced.iterrows():
+        distance, origin = flight['distance_km'], flight['ADEP']
+        n_pax = _passengers(flight)
+        delay = flight.get('total_delay', 0)
+        t_air = door_to_door_min(distance, origin, by_air=True)
+        t_rail = door_to_door_min(distance, origin, by_air=False)
+        co2_air_kg = flight.get('flight_co2_kg', 0)
+        co2_rail = rail_co2_kg(distance, origin, n_pax)
+        rows.append({
+            'ARCID': flight.get('ARCID', 'N/A'),
+            'ADEP': origin,
+            'distance_km': round(distance, 1),
+            'passengers': n_pax,
+            'atfm_delay_min': round(delay, 1),
+            'd2d_air_nominal_min': round(t_air, 1),
+            'd2d_air_delayed_min': round(t_air + delay, 1),
+            'd2d_rail_min': round(t_rail, 1),
+            'rail_time_saving_min': round(t_air + delay - t_rail, 1),
+            'co2_air_kg': round(co2_air_kg, 1),
+            'co2_rail_kg': round(co2_rail, 1),
+            'net_co2_saving_kg': round(co2_air_kg - co2_rail, 1),
         })
-    return pd.DataFrame(filas)
+    return pd.DataFrame(rows)
 
 
-def simular_sin_vuelos(df_vuelos: pd.DataFrame, indices_eliminados, params: dict) -> dict:
+def simulate_without(df_flights: pd.DataFrame, removed_idx, params: dict) -> dict:
     """Re-run GDP and GHP (both objectives) without the replaced flights."""
-    df_reducido = df_vuelos.drop(index=indices_eliminados)
-    res_gdp = gdp.ejecutar_nucleo_gdp(df_reducido, params, run_compression=False)
-    res_ghp = ejecutar_ghp_completo(
-        res_gdp['vuelos_asignados'], list(res_gdp['slots']['slot_start_min']), params)
-    return {'resultados_gdp': res_gdp, 'resultados_ghp': res_ghp, 'df_reducido': df_reducido}
+    df_reduced = df_flights.drop(index=removed_idx)
+    res_gdp = gdp.run_gdp(df_reduced, params, run_compression=False)
+    res_ghp = run_ghp(
+        res_gdp['allocation'], list(res_gdp['slots']['slot_start_min']), params)
+    return {'gdp_results': res_gdp, 'ghp_results': res_ghp, 'df_reduced': df_reduced}
 
 
-def ejecutar_analisis_intermodal(
-    df_vuelos: pd.DataFrame,
-    resultados_base: dict,
-    resultados_base_ghp: dict,
+def run_intermodal_analysis(
+    df_flights: pd.DataFrame,
+    base_results: dict,
+    base_ghp_results: dict,
     params: dict,
     base_dir: str,
 ) -> dict:
@@ -153,62 +153,62 @@ def ejecutar_analisis_intermodal(
     h_start = params['H_START']
 
     # 1. Rail-replaceable flights among the flights affected by the regulation.
-    base_afectados = resultados_base['vuelos_asignados']
-    marcados = identificar_vuelos_substituibles(base_afectados, verbose=True)
-    sustituidos = marcados[marcados['es_substituible']]
-    df_modal = generar_comparativa_modal(sustituidos)
+    base_affected = base_results['allocation']
+    flagged = flag_rail_replaceable(base_affected, verbose=True)
+    replaced = flagged[flagged['rail_replaceable']]
+    df_modal = modal_comparison(replaced)
 
     # 2. Re-simulation without them.
-    red = simular_sin_vuelos(df_vuelos, sustituidos.index, params)
+    reduced_run = simulate_without(df_flights, replaced.index, params)
 
     # 3. KPIs of the six scenarios (base and reduced, GDP and both GHP).
-    escenarios_base = {
-        'GDP (RBS)':     base_afectados,
-        'GHP emissions': resultados_base_ghp['GHP_Emissions'],
-        'GHP cost':      resultados_base_ghp['GHP_Cost'],
+    base_scenarios = {
+        'GDP (RBS)':     base_affected,
+        'GHP emissions': base_ghp_results['GHP_Emissions'],
+        'GHP cost':      base_ghp_results['GHP_Cost'],
     }
-    escenarios_red = {
-        'Intermodal GDP (RBS)':     red['resultados_gdp']['vuelos_asignados'],
-        'Intermodal GHP emissions': red['resultados_ghp']['GHP_Emissions'],
-        'Intermodal GHP cost':      red['resultados_ghp']['GHP_Cost'],
+    reduced_scenarios = {
+        'Intermodal GDP (RBS)':     reduced_run['gdp_results']['allocation'],
+        'Intermodal GHP emissions': reduced_run['ghp_results']['GHP_Emissions'],
+        'Intermodal GHP cost':      reduced_run['ghp_results']['GHP_Cost'],
     }
-    kpis = {n: evaluar_escenario(d, n, h_start)
-            for n, d in {**escenarios_base, **escenarios_red}.items()}
+    kpis = {n: evaluate_scenario(d, n, h_start)
+            for n, d in {**base_scenarios, **reduced_scenarios}.items()}
 
-    co2_vuelos_dia = df_vuelos['co2_kg_vuelo'].sum()
-    co2_vuelos_sustituidos = sustituidos['co2_kg_vuelo'].sum()
-    co2_tren = df_modal['co2_tren_kg'].sum() if len(df_modal) else 0.0
-    h_noreg = {**{n: resultados_base['h_noreg'] for n in escenarios_base},
-               **{n: red['resultados_gdp']['h_noreg'] for n in escenarios_red}}
-    co2_nominal = {**{n: co2_vuelos_dia for n in escenarios_base},
-                   **{n: co2_vuelos_dia - co2_vuelos_sustituidos for n in escenarios_red}}
-    co2_rail = {**{n: 0.0 for n in escenarios_base}, **{n: co2_tren for n in escenarios_red}}
-    co2_sistema = {n: co2_nominal[n] + kpis[n]['CO2_Total_Retraso_kg'] + co2_rail[n] for n in kpis}
+    co2_all_flights = df_flights['flight_co2_kg'].sum()
+    co2_replaced_flights = replaced['flight_co2_kg'].sum()
+    co2_rail_total = df_modal['co2_rail_kg'].sum() if len(df_modal) else 0.0
+    h_noreg = {**{n: base_results['h_noreg'] for n in base_scenarios},
+               **{n: reduced_run['gdp_results']['h_noreg'] for n in reduced_scenarios}}
+    co2_nominal = {**{n: co2_all_flights for n in base_scenarios},
+                   **{n: co2_all_flights - co2_replaced_flights for n in reduced_scenarios}}
+    co2_rail = {**{n: 0.0 for n in base_scenarios}, **{n: co2_rail_total for n in reduced_scenarios}}
+    co2_system = {n: co2_nominal[n] + kpis[n]['delay_co2_kg'] + co2_rail[n] for n in kpis}
 
-    df_comp = resumen_escenarios(kpis, extras={
+    df_summary = summary_table(kpis, extras={
         'HNoReg (min UTC)':                    h_noreg,
-        'Flights replaced by rail':            {**{n: 0 for n in escenarios_base},
-                                                **{n: len(sustituidos) for n in escenarios_red}},
+        'Flights replaced by rail':            {**{n: 0 for n in base_scenarios},
+                                                **{n: len(replaced) for n in reduced_scenarios}},
         'Nominal CO2 of all flights flown (kg)': {n: round(v, 1) for n, v in co2_nominal.items()},
         'Rail CO2 (kg)':                       {n: round(v, 1) for n, v in co2_rail.items()},
-        'System CO2: flights + delay + rail (kg)': {n: round(v, 1) for n, v in co2_sistema.items()},
+        'System CO2: flights + delay + rail (kg)': {n: round(v, 1) for n, v in co2_system.items()},
     })
 
-    print(f"   Replaced flights (within the regulation): {len(sustituidos)}")
-    print(f"   HNoReg: {resultados_base['h_noreg']} -> {red['resultados_gdp']['h_noreg']} min UTC")
+    print(f"   Replaced flights (within the regulation): {len(replaced)}")
+    print(f"   HNoReg: {base_results['h_noreg']} -> {reduced_run['gdp_results']['h_noreg']} min UTC")
     print(f"   Direct CO2 saving of the substitution: "
-          f"{co2_vuelos_sustituidos - co2_tren:,.0f} kg (flights {co2_vuelos_sustituidos:,.0f} - rail {co2_tren:,.0f})")
-    print(df_comp.to_string(index=False))
+          f"{co2_replaced_flights - co2_rail_total:,.0f} kg (flights {co2_replaced_flights:,.0f} - rail {co2_rail_total:,.0f})")
+    print(df_summary.to_string(index=False))
 
     os.makedirs(os.path.join(base_dir, 'data/processed'), exist_ok=True)
-    df_modal.to_csv(os.path.join(base_dir, 'data/processed/wp4_comparativa_modal.csv'), index=False)
-    df_comp.to_csv(os.path.join(base_dir, 'data/processed/wp4_comparativa_intermodal.csv'), index=False)
+    df_modal.to_csv(os.path.join(base_dir, 'data/processed/wp4_modal_comparison.csv'), index=False)
+    df_summary.to_csv(os.path.join(base_dir, 'data/processed/wp4_summary.csv'), index=False)
 
     return {
         'df_modal': df_modal,
-        'df_comparativa': df_comp,
-        'resultados_reducido': red,
-        'escenarios_reducidos': escenarios_red,
+        'summary': df_summary,
+        'reduced': reduced_run,
+        'reduced_scenarios': reduced_scenarios,
         'kpis': kpis,
-        'co2': {'vuelos_sustituidos': co2_vuelos_sustituidos, 'tren': co2_tren},
+        'co2': {'replaced_flights': co2_replaced_flights, 'rail': co2_rail_total},
     }

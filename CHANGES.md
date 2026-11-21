@@ -13,7 +13,7 @@ Status legend: ⏳ pending · ✅ fixed
 | | Issue | Status |
 |---|---|---|
 | R1 | Unpinned dependencies: PuLP ≥ 3 changed its API and the pipeline crashed in WP3. | ✅ versions pinned; PuLP no longer needed (see C2) |
-| R2 | 19 of 47 tests were stale and one test file was never collected. | ✅ 86 tests, all rewritten for pytest; run in CI on the synthetic day |
+| R2 | 19 of 47 tests were stale and one test file was never collected. | ✅ 89 tests, all rewritten for pytest; run in CI on the synthetic day |
 
 ## Results
 
@@ -23,7 +23,7 @@ Status legend: ⏳ pending · ✅ fixed
 | C2 | The cost-optimal GHP minimised a *linear* proxy (r<sub>f</sub> = Cook cost at 15 min / 15, constant), while results were evaluated on the non-linear cost curve. The statement asks for r<sub>f</sub>(t) to depend on the length of the delay. Because each slot holds one flight, the GHP is a linear assignment problem: it is now solved exactly with `scipy.optimize.linear_sum_assignment` on the true cost matrix c<sub>ft</sub> = cost<sub>f</sub>(t − ETA<sub>f</sub>). It is cross-checked in the tests against Dènia Cabrera's original MILP formulation and against brute force. The pipeline drops from 169 s to 24 s, and PuLP is no longer a dependency. | GHP cost scenario | ✅ |
 | C3 | The airline fairness RSD reported (9.77 / 35.58 / 84.81 %) is the RSD of the top-4 airline mean delays. A later refactor replaced it with a per-flight RSD, and the delivered run printed 0 %. The report's definition is restored as `RSD_Aerolineas_%`, next to the statement's per-airline mean delay and RSD. | Fairness KPI | ✅ |
 | C4 | WP4 selected the rail-replaceable flights over the whole day and removed all of them, although the statement restricts the study to the regulation interval ("not during 24h"). Its "total system CO₂" subtracted the CO₂ of those 11 flights (69.0 t) from a baseline covering only the regulated window (9 of them, 57.0 t). The direct saving (43 t) also used all 11, while the report speaks of 9. Now only flights affected by the regulation are replaced, and system CO₂ uses one boundary for every scenario: nominal CO₂ of all arrivals flown + delay CO₂ + rail CO₂. | WP4 figures (see results below) | ✅ |
-| C5 | The WP2 sensitivity heatmaps charged ground delay at the flight's *cruise* fuel burn, although the code's own documentation (and WP3/WP4) treats an aircraft held at the gate as running on fixed electrical ground power. That put the CO₂ of ground delay at 4,445 t for the baseline GDP, instead of 11.7 t with FEGP. It also made the "CO₂ savings" heatmap numerically identical to the "ground-delay CO₂" heatmap. Both now use the same FEGP model as WP3/WP4 (`cost_model.co2_tierra_kg_por_min`). | WP2: the ground-delay CO₂ heatmap falls about 380×; the CO₂-savings heatmap now differs from it (4,433 t for R = 3000 km, H<sub>file</sub> = 150 min). Air delay, unrecoverable delay and cost heatmaps unchanged. | ✅ |
+| C5 | The WP2 sensitivity heatmaps charged ground delay at the flight's *cruise* fuel burn, although the code's own documentation (and WP3/WP4) treats an aircraft held at the gate as running on fixed electrical ground power. That put the CO₂ of ground delay at 4,445 t for the baseline GDP, instead of 11.7 t with FEGP. It also made the "CO₂ savings" heatmap numerically identical to the "ground-delay CO₂" heatmap. Both now use the same FEGP model as WP3/WP4 (`cost_model.co2_tierra_kg_por_min`, later replaced by the APU model of C17). | WP2: the ground-delay CO₂ heatmap falls about 380×; the CO₂-savings heatmap now differs from it (4,433 t for R = 3000 km, H<sub>file</sub> = 150 min). Air delay, unrecoverable delay and cost heatmaps unchanged. | ✅ |
 | C6 | Text vs. code: the report states that the GHP lowers the maximum delay, while its own appendix table shows the opposite. Compression moved 222 flights (the report says 212). WP4 air in-vehicle time uses 440 kt (the report says 400 kt) and each flight's real seats (the report says 180). | Text only | noted |
 | C7 | Flight distance was inferred from block time minus taxi time times a RECAT cruise speed. It underestimated short routes badly: Palma (202 km) came out as 0–115 km, and two Vueling flights got 6.8 km and an absurd 4.4 t of CO₂. Madrid flights (483 km) were often above 500 km and so missed the rail filter, although the report describes the filter as "orthodromic distance". Distances are now great-circle, from a coordinates table built from public-domain OurAirports data (`tools/build_airport_table.py`). | WP1: the GDP allocation, delays and costs are unchanged. System CO₂ +1.6 %; delay CO₂ −0.3 %. WP4: 18 rail-replaceable flights in the regulated window instead of 9 (every Madrid flight now qualifies), and the direct rail saving roughly doubles. Final WP4 figures depend on C4. | ✅ |
 | C8 | Every arrival from Hstart to midnight was regulated. The course defines controlled flights as those arriving between Hstart and HNoReg; the rest are *NotAffected* and fly as scheduled (WP3 is likewise applied to "the affected flights"). After HNoReg (19:14), 106 flights were still being assigned slots, and 89 of them picked up small delays (154.5 min in total) caused only by slot discretisation. | Affected flights 521 → 415; GDP total delay 35,834.5 → 35,680.0 min; every per-flight average, OTP and fairness figure changes accordingly. The delay of the flights that are actually affected is unchanged. | ✅ |
@@ -35,6 +35,10 @@ Status legend: ⏳ pending · ✅ fixed
 | C14 | The course asks to "consider a margin (30 min for example) to exempt flights ready to depart at Hfile (already boarded, door closed, etc.)", and WP3 lists "flights ready to depart" among the exempt flights. The delivered code had the option but used 0 min. The margin is now 30 min (`config.READY_MARGIN`). | One more flight is ExemptFlying (360 controlled, 55 exempt); totals change by less than 0.1 %. | ✅ |
 | C15 | The statement notes that an ETD later than the ETA means the flight left the previous day. The "already flying at Hfile" test compared the raw ETD with Hfile, so such a flight would have been treated as controlled. On 10 August all 27 such flights are intercontinental (already exempt), so no result changes, but the rule now follows the statement. | None on this day | ✅ |
 | C16 | The WP2 cost heatmap and the WP2 "do-nothing vs. GDP" figure used flat rates of 100 €/min airborne and 35 €/min on the ground, attributed to Cook & Tanner. Neither value is in that report: its 100 €/min is the network average for *all* ATFM delay, mostly ground delay. WP2 now uses the same cost model as WP3–WP5 (do-nothing: the same delay costed en route). The WP2 cost figures are now consistent with the rest of the project. | WP2 cost-savings heatmap and figure | ✅ |
+| C17 | **CO₂ of ground delay.** The WP2 statement asks to "look for references for fuel consumption at gate ... one value for each aircraft category" and to convert fuel to CO₂ with 3.16 kg/kg. The delivered code assumed every held aircraft runs on fixed electrical ground power, priced with the *Spanish* grid factor. But ground delay is absorbed at the *origin* airport (Paris, London, Frankfurt...), not at Barcelona, and FEGP is not available at every stand. Ground delay now burns APU fuel at the normal-running (maximum air-conditioning) flow of ICAO Doc 9889, *Airport Air Quality Manual*, Table 3-A1-6, by seat group (101 kg/h below 100 seats, 110 kg/h for 100–199, 164 kg/h for 200–299, 238 kg/h from 300), × 3.16. | Ground-delay CO₂ of the GDP 10.6 t → 230 t; delay CO₂ 30.7 t → 249 t. The emissions GHP now has something to optimise: −10 % delay CO₂ (it was −2.3 %). WP2 CO₂ heatmaps and WP4 system CO₂ change accordingly. | ✅ |
+| C18 | **Cancellation exercise.** The statement asks that *one airline* "with lots of flights" cancels *all* its flights delayed by more than 2–3 h, then substitution within that airline, then compression. The code cancelled the 12 most delayed controlled flights of any airline (6 of them Vueling) and mixed both steps. Now Vueling (146 controlled flights) cancels its 16 flights delayed by more than 3 h; substitution fills its freed slots with its own later flights in their original order, and compression then passes the remaining slots on (owner first, then earliest ETA). The statement's KPIs are reported: cancelled flights, moves by substitution and by compression, delay saved, and the mean delay of the airline's remaining flights. | Report §penalty: 16 cancelled, 96 substitutions + 95 compression moves, 5,302 min saved; Vueling's remaining flights 92.4 → 60.5 min mean delay. | ✅ |
+| C19 | The WP2 statement lists the KPIs to report: total, maximum and mean air and ground delay, the relative standard deviation of each, air and ground CO₂, delayed flights and OTP. The summary tables lacked the mean and maximum ground delay, both RSDs and the air/ground CO₂ split. The RSDs were also computed over *all* flights, mixing in the zeros of flights that cannot take that kind of delay. They are now computed over exempt flights (air) and controlled flights (ground), and every KPI is in the WP2–WP5 tables. | WP2 tables (e.g. RSD of ground delay 61 %, mean ground delay 98.8 min per controlled flight) | ✅ |
+| C20 | The statement asks for two histograms, arrivals per hour before the regulation (ETA) and after it, as a check of the GDP. The second bar series was drawn from the Newell capacity curve rather than from the allocation; it now counts the CTAs. The slot table also records the airline owning each slot, as the statement's slot matrix does. | WP2 Figure 2 | ✅ |
 
 C4 quotes the figures obtained with the original distance model.
 
@@ -79,29 +83,30 @@ equivalents is in the README.
 | "RBS is EUROCONTROL's official algorithm" | RBS is the FAA/CDM GDP rule taught in the course; EUROCONTROL uses CASA | Factual correction. |
 | — | Output columns `CTA` and `CTD` | Course WP2 asks for the CTA of every flight. |
 
-### WP3 results after C1–C3, C8–C10 and C13–C14 (real traffic day, 415 affected flights)
+### WP3 results after C1–C3, C8–C10 and C13–C19 (real traffic day, 415 affected flights)
 
 | | GDP (RBS) | GHP emissions | GHP cost |
 |---|---|---|---|
 | Total delay (min) | 35,680 | 35,680 | 35,680 |
 | Max delay (min) | 224 | 300 | 300 |
-| OTP, delay < 15 min | 18.8 % | 41.2 % | 24.1 % |
-| Unrecoverable delay (min) | 1,545 | 1,522 | 1,585 |
-| Delay passed on to next rotations (min) | 18,895 | 21,667 | **17,990** |
-| Delay CO₂ (kg) | 30,679 | **29,965** (−2.3 %) | 30,062 |
-| Cost of delay (EUR) | 8.46 M | 9.77 M | **6.62 M** (−21.7 %) |
-| of which reactionary (EUR) | 3.25 M | 3.65 M | 1.65 M |
-| Airline fairness, RSD of top-4 mean delays | 26.8 % | **25.7 %** | 40.9 % |
+| OTP, delay < 15 min | 18.8 % | 50.1 % | 24.1 % |
+| Unrecoverable delay (min) | 1,545 | 1,362 | 1,585 |
+| Delay passed on to next rotations (min) | 18,895 | 22,834 | **17,990** |
+| Delay CO₂ (kg) | 249,296 | **224,306** (−10.0 %) | 240,898 |
+| Cost of delay (EUR) | 8.46 M | 9.79 M | **6.62 M** (−21.7 %) |
+| of which reactionary (EUR) | 3.25 M | 3.62 M | 1.65 M |
+| Airline fairness, RSD of top-4 mean delays | **26.8 %** | 86.3 % | 40.9 % |
 
 The GHP lowers the cost (cost objective) or the CO₂ (emissions objective) of
 the same total delay. The cost objective does it mostly by holding first the
 aircraft whose next departure has slack, which halves the reactionary cost, at
 the expense of fairness between airlines and of a longer maximum delay. The
-emissions objective holds light aircraft longest whatever their rotation, so it
-propagates *more* delay and costs 15 % more than RBS: minimising CO₂ and cost
-are conflicting objectives here.
+emissions objective holds the aircraft with the smallest APUs longest whatever
+their rotation or airline: it propagates more delay, costs 16 % more than RBS
+and is by far the least fair. Minimising CO₂ and cost are conflicting
+objectives.
 
-Cost-model sensitivity (`wp3_sensibilidad_coste.csv`): optimising on primary
+Cost-model sensitivity (`wp3_cost_sensitivity.csv`): optimising on primary
 costs only saves 8.6 %, on the rotation model 21.7 % and on the "full" table
 22.3 %, each measured with its own model. Only the rotation-optimised schedule
 beats RBS under every model, including ±10–15 min on the minimum turnaround
@@ -117,13 +122,13 @@ times.
 | HNoReg | 19:14 | **18:09** (−65 min) | 19:14 | 18:09 |
 | Affected flights | 415 | 367 | 415 | 367 |
 | Total delay (min) | 35,680 | 30,454 (−14.6 %) | 35,680 | 30,454 |
-| Delay CO₂ (kg) | 30,679 | 28,916 | 30,062 | 28,437 |
+| Delay CO₂ (kg) | 249,296 | 214,538 | 240,898 | 208,219 |
 | Cost of delay (EUR) | 8.46 M | 6.91 M | 6.62 M | **5.49 M** |
 | Airline fairness RSD | 26.8 % | **13.8 %** | 40.9 % | 28.1 % |
-| System CO₂ (t) | 12,040.6 | 11,972.5 | 12,040.0 | 11,972.0 |
+| System CO₂ (t) | 12,259.2 | 12,158.1 | 12,250.8 | 12,151.8 |
 
-The system saves about 68 t of CO₂: 66.4 t direct (104.1 t of flights replaced
-by 37.7 t of rail) and about 1.7 t less delay CO₂. Door to door, the train beats
+The system saves about 101 t of CO₂: 66.4 t direct (104.1 t of flights replaced
+by 37.7 t of rail) and 34.8 t less delay CO₂. Door to door, the train beats
 the delayed flight only on Madrid (246 min vs 261 min on average).
 
 ### WP5
@@ -141,8 +146,11 @@ the delayed flight only on Madrid (246 min vs 261 min on average).
 - GitHub Actions runs the tests and the full pipeline on the synthetic day.
   The synthetic day now also contains departures (same registrations), so
   the turnaround model is exercised without the real file.
-- Code comments, docstrings and console output translated to English. Function
-  and variable names keep the team's original (Spanish) identifiers.
+- Code, comments, docstrings, console output, output files, Excel sheets and
+  KPI keys are in English. Identifiers were renamed in one pass from the
+  team's original Spanish names (e.g. `ejecutar_nucleo_gdp` → `run_gdp`,
+  `etiquetar_vuelos_gdp` → `classify_flights`, `Coste_Cook_Total_EUR` →
+  `delay_cost_total_eur`); the git history keeps the originals.
 
 ### Points examined and left as they are
 

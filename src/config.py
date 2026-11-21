@@ -98,7 +98,7 @@ class AirportConfig:
 
     def to_params_dict(self) -> dict:
         """
-        Returns parameters that ejecutar_nucleo_gdp() will need.
+        Returns parameters that run_gdp() will need.
 
         THIS METHOD:
             with this method, we gather all info in a unique place (this dictionary) 

@@ -33,6 +33,8 @@ was published; authorship and dates are unchanged.
   (reactionary delays), cited in the WP3 statement; minimum declared ground
   time of 35 min from the E190 operations-manual summary provided with the
   course material (not redistributed).
+- **APU fuel flow at the gate** — ICAO Doc 9889, *Airport Air Quality
+  Manual*, 2nd edition, Table 3-A1-6.
 - **Connecting passengers at LEBL** — Cambra de Comerç de Barcelona,
   *Observatori del Transport Aeri* (2025–2026 editions).
 - **Traffic data** — the LEBL arrivals and departures of 10 August 2025 used for every result

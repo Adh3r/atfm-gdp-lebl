@@ -56,7 +56,7 @@ def test_great_circle_known_distances():
 
 
 # -----------------------------------------------------------------------------
-# preparar_vuelos on small synthetic inputs
+# prepare_flights on small synthetic inputs
 # -----------------------------------------------------------------------------
 
 def _write_inputs(tmp_path, flights_rows, airports_rows=None):
@@ -83,44 +83,44 @@ SYNTHETIC = [
 
 
 def test_synthetic_arrivals_are_prepared(tmp_path):
-    df = prep.preparar_vuelos(*_write_inputs(tmp_path, SYNTHETIC)).set_index('ARCID')
+    df = prep.prepare_flights(*_write_inputs(tmp_path, SYNTHETIC)).set_index('ARCID')
     assert list(df.index) == ['DAL110', 'N818CA', 'VLG1001']          # arrivals only, by ETA
     assert df.loc['N818CA', 'airline'] == prep.GENERAL_AVIATION
     assert df.loc['VLG1001', 'airline'] == 'VLG'
     assert not df.loc['DAL110', 'is_ecac']
     assert df.loc['VLG1001', 'is_ecac']
-    assert df.loc['DAL110', 'duracion_vuelo_min'] == 435                 # crosses midnight
-    assert df.loc[['N818CA', 'VLG1001'], 'distancia_km'].tolist() == pytest.approx([483, 483], abs=2)
-    assert (df['co2_kg_vuelo'] > 0).all()
+    assert df.loc['DAL110', 'block_time_min'] == 435                 # crosses midnight
+    assert df.loc[['N818CA', 'VLG1001'], 'distance_km'].tolist() == pytest.approx([483, 483], abs=2)
+    assert (df['flight_co2_kg'] > 0).all()
 
 
 def test_missing_airport_coordinates_raise(tmp_path):
     paths = _write_inputs(tmp_path, SYNTHETIC, airports_rows=[('LEBL', 'Barcelona', 41.2971, 2.07846)])
     with pytest.raises(ValueError, match='Missing coordinates'):
-        prep.preparar_vuelos(*paths)
+        prep.prepare_flights(*paths)
 
 
 def test_unparseable_time_raises(tmp_path):
     rows = SYNTHETIC + [('VLG1003', 'A320', 'LEMD', 'LEBL', 'ECABE', 360, '07:00:00', '12', 'late')]
     with pytest.raises(ValueError, match='Unparseable ETA'):
-        prep.preparar_vuelos(*_write_inputs(tmp_path, rows))
+        prep.prepare_flights(*_write_inputs(tmp_path, rows))
 
 
 # -----------------------------------------------------------------------------
-# preparar_vuelos on the synthetic sample day (always available)
+# prepare_flights on the synthetic sample day (always available)
 # -----------------------------------------------------------------------------
 
 @pytest.fixture(scope='module')
 def sample():
-    return prep.preparar_vuelos(config.SAMPLE_TRAFFIC, FLEET)
+    return prep.prepare_flights(config.SAMPLE_TRAFFIC, FLEET)
 
 
 def test_sample_day_is_complete(sample):
     assert len(sample) == 540
     assert sample['minutes_eta'].is_monotonic_increasing
     assert sample[['recat', 'size_seats_avg']].notna().all().all()
-    assert (sample['distancia_km'] > 50).all()
-    assert (sample['co2_kg_vuelo'] > 0).all()
+    assert (sample['distance_km'] > 50).all()
+    assert (sample['flight_co2_kg'] > 0).all()
 
 
 def test_sample_day_overloads_the_reduced_capacity(sample):
@@ -129,14 +129,14 @@ def test_sample_day_overloads_the_reduced_capacity(sample):
 
 
 # -----------------------------------------------------------------------------
-# preparar_vuelos on the real LEBL day (skipped when the file is not present)
+# prepare_flights on the real LEBL day (skipped when the file is not present)
 # -----------------------------------------------------------------------------
 
 @pytest.fixture(scope='module')
 def lebl():
     if not os.path.exists(FLIGHTS):
         pytest.skip('real traffic file not available (not redistributed)')
-    return prep.preparar_vuelos(FLIGHTS, FLEET)
+    return prep.prepare_flights(FLIGHTS, FLEET)
 
 
 def test_real_day_shape(lebl):
@@ -152,13 +152,13 @@ def test_real_day_every_type_has_fleet_data(lebl):
 
 
 def test_real_day_distances_are_plausible(lebl):
-    assert (lebl['distancia_km'] > 50).all()
-    palma = lebl.loc[lebl['ADEP'] == 'LEPA', 'distancia_km']
+    assert (lebl['distance_km'] > 50).all()
+    palma = lebl.loc[lebl['ADEP'] == 'LEPA', 'distance_km']
     assert palma.round().unique().tolist() == [202]
 
 
 def test_real_day_co2_positive(lebl):
-    assert (lebl['co2_kg_vuelo'] > 0).all()
+    assert (lebl['flight_co2_kg'] > 0).all()
 
 
 def test_real_day_ecac_tagging(lebl):

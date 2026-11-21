@@ -18,7 +18,7 @@ import lib_data_prep as prep  # noqa: E402
 import lib_gdp_core as gdp  # noqa: E402
 import lib_ghp_solver as ghp  # noqa: E402
 from config import CFG, FS_CONTROLLED, FS_EXEMPT_INTERNATIONAL  # noqa: E402
-from lib_metrics import evaluar_escenario  # noqa: E402
+from lib_metrics import evaluate_scenario  # noqa: E402
 
 PARAMS = CFG.to_params_dict()
 
@@ -34,15 +34,15 @@ PARAMS = CFG.to_params_dict()
 def ghp_milp_reference(cost_matrix: np.ndarray) -> float:
     n_f, n_t = cost_matrix.shape
     c = cost_matrix.flatten()
-    a_vuelos = np.zeros((n_f, n_f * n_t))          # each flight exactly one slot
+    a_flights = np.zeros((n_f, n_f * n_t))          # each flight exactly one slot
     for f in range(n_f):
-        a_vuelos[f, f * n_t:(f + 1) * n_t] = 1
+        a_flights[f, f * n_t:(f + 1) * n_t] = 1
     a_slots = np.zeros((n_t, n_f * n_t))           # each slot at most one flight
     for t in range(n_t):
         a_slots[t, t::n_t] = 1
     res = milp(
         c=c,
-        constraints=[LinearConstraint(a_vuelos, 1, 1), LinearConstraint(a_slots, 0, 1)],
+        constraints=[LinearConstraint(a_flights, 1, 1), LinearConstraint(a_slots, 0, 1)],
         integrality=np.ones_like(c),
         bounds=Bounds(0, 1),
     )
@@ -65,33 +65,33 @@ def _toy_flights(n=6, seed=0):
     return df
 
 
-@pytest.mark.parametrize('objetivo', ghp.OBJETIVOS)
-def test_assignment_solver_matches_milp_reference(objetivo):
+@pytest.mark.parametrize('objective', ghp.OBJECTIVES)
+def test_assignment_solver_matches_milp_reference(objective):
     df = _toy_flights()
     slots = np.arange(360, 360 + 3 * 10, 3, dtype=float)          # 10 slots, 3 min apart
-    coste = ghp.matriz_costes(df, slots, objetivo)
-    res = ghp.resolver_ghp(df, slots, objetivo)
+    cost = ghp.build_cost_matrix(df, slots, objective)
+    res = ghp.solve_ghp(df, slots, objective)
     idx = {s: k for k, s in enumerate(slots)}
-    obtenido = sum(coste[i, idx[s]] for i, s in enumerate(res.loc[df.index, 'CTA']))
-    assert obtenido == pytest.approx(ghp_milp_reference(coste), rel=1e-9)
+    obtenido = sum(cost[i, idx[s]] for i, s in enumerate(res.loc[df.index, 'CTA']))
+    assert obtenido == pytest.approx(ghp_milp_reference(cost), rel=1e-9)
 
 
 def test_assignment_solver_matches_brute_force():
     df = _toy_flights(n=4, seed=3)
     slots = np.array([360, 363, 366, 369, 372, 375], dtype=float)
-    coste = ghp.matriz_costes(df, slots, 'cost')
-    mejor = min(sum(coste[f, t] for f, t in enumerate(p))
+    cost = ghp.build_cost_matrix(df, slots, 'cost')
+    best = min(sum(cost[f, t] for f, t in enumerate(p))
                 for p in itertools.permutations(range(len(slots)), len(df)))
-    res = ghp.resolver_ghp(df, slots, 'cost')
+    res = ghp.solve_ghp(df, slots, 'cost')
     idx = {s: k for k, s in enumerate(slots)}
-    assert sum(coste[i, idx[s]] for i, s in enumerate(res.loc[df.index, 'CTA'])) == pytest.approx(mejor)
+    assert sum(cost[i, idx[s]] for i, s in enumerate(res.loc[df.index, 'CTA'])) == pytest.approx(best)
 
 
 def test_no_flight_lands_before_its_eta_and_slots_are_unique():
     df = _toy_flights(n=8, seed=5)
     slots = np.arange(360, 420, 3, dtype=float)
-    for objetivo in ghp.OBJETIVOS:
-        res = ghp.resolver_ghp(df, slots, objetivo)
+    for objective in ghp.OBJECTIVES:
+        res = ghp.solve_ghp(df, slots, objective)
         assert (res['CTA'] >= res['minutes_eta']).all()
         assert res['CTA'].is_unique
 
@@ -100,7 +100,7 @@ def test_exempt_flights_are_served_first_in_eta_order():
     df = _toy_flights(n=3, seed=1)
     df.loc[0, 'flight_status'] = FS_EXEMPT_INTERNATIONAL
     slots = np.array([360, 363, 366, 369, 372, 375, 378, 381], dtype=float)
-    res = ghp.resolver_ghp(df, slots, 'cost').set_index('ARCID')
+    res = ghp.solve_ghp(df, slots, 'cost').set_index('ARCID')
     eta0 = df.loc[0, 'minutes_eta']
     assert res.loc['F0', 'CTA'] == slots[slots >= eta0][0]
     assert res.loc['F0', 'air_delay'] == res.loc['F0', 'total_delay']
@@ -110,7 +110,7 @@ def test_exempt_flights_are_served_first_in_eta_order():
 def test_infeasible_instance_raises():
     df = _toy_flights(n=3)
     with pytest.raises(RuntimeError):
-        ghp.resolver_ghp(df, np.array([360.0, 363.0]), 'validation')
+        ghp.solve_ghp(df, np.array([360.0, 363.0]), 'validation')
 
 
 # -----------------------------------------------------------------------------
@@ -118,23 +118,23 @@ def test_infeasible_instance_raises():
 # -----------------------------------------------------------------------------
 
 @pytest.mark.parametrize('base', cost_model.COST_BASES)
-@pytest.mark.parametrize('holgura', [np.nan, 0.0, 40.0])
-def test_cost_of_delay_never_decreases_with_delay(base, holgura):
+@pytest.mark.parametrize('buffer', [np.nan, 0.0, 40.0])
+def test_cost_of_delay_never_decreases_with_delay(base, buffer):
     d = np.linspace(0, 400, 4001)
-    for tipo in cost_model._PAX_BASE_TABLE:
-        for fase_aire in (False, True):
-            g, a = (np.zeros_like(d), d) if fase_aire else (d, 0.0)
-            c = cost_model.coste_vuelo_vec(tipo, 1.0, g, a, holgura, base)
-            assert (np.diff(c) >= -1e-9).all(), (tipo, base)
+    for cook_type in cost_model._PAX_BASE_TABLE:
+        for airborne in (False, True):
+            g, a = (np.zeros_like(d), d) if airborne else (d, 0.0)
+            c = cost_model.flight_cost(cook_type, 1.0, g, a, buffer, base)
+            assert (np.diff(c) >= -1e-9).all(), (cook_type, base)
             assert c[0] == 0
 
 
 def test_cost_tables_match_cook_and_tanner_reference_values():
     # Spot checks against Cook & Tanner (2015), Tables 22, 24, 26 and 28.
-    prim = cost_model.coste_primario_vec
+    prim = cost_model.primary_cost
     assert prim('A320', [5], 'at_gate')[0] == 90           # Table 22
     assert prim('A320', [60], 'en_route')[0] == 6650       # Table 24
-    full = cost_model.coste_vuelo_vec
+    full = cost_model.flight_cost
     assert full('A320', 1.0, [60.0], base='full')[0] == 8350                      # Table 26
     assert full('B744', 1.0, 0.0 * np.ones(1), [300.0], base='full')[0] == 343600  # Table 28
     # beyond 300 min the last segment is extended
@@ -144,37 +144,37 @@ def test_cost_tables_match_cook_and_tanner_reference_values():
 def test_reactionary_cost_is_the_same_at_gate_and_en_route():
     # Cook & Tanner cost all reactionary delay at the gate, so full - primary
     # must coincide in the at-gate and en-route tables (up to rounding).
-    for tipo in cost_model._PAX_BASE_TABLE:
-        g = np.subtract(cost_model._COOK_TACTICAL[('at_gate', 'full')][tipo],
-                        cost_model._COOK_TACTICAL[('at_gate', 'primary')][tipo])
-        e = np.subtract(cost_model._COOK_TACTICAL[('en_route', 'full')][tipo],
-                        cost_model._COOK_TACTICAL[('en_route', 'primary')][tipo])
-        assert np.abs(g - e).max() <= 10, tipo
+    for cook_type in cost_model._PAX_BASE_TABLE:
+        g = np.subtract(cost_model._COOK_TACTICAL[('at_gate', 'full')][cook_type],
+                        cost_model._COOK_TACTICAL[('at_gate', 'primary')][cook_type])
+        e = np.subtract(cost_model._COOK_TACTICAL[('en_route', 'full')][cook_type],
+                        cost_model._COOK_TACTICAL[('en_route', 'primary')][cook_type])
+        assert np.abs(g - e).max() <= 10, cook_type
 
 
 def test_rotation_cost_sits_between_primary_and_full():
     d = np.linspace(0, 300, 301)
-    for holgura in (0.0, 30.0, 90.0, np.nan):
-        p = cost_model.coste_vuelo_vec('A320', 1.0, d, base='primary')
-        r = cost_model.coste_vuelo_vec('A320', 1.0, d, 0.0, holgura, 'rotation')
-        f = cost_model.coste_vuelo_vec('A320', 1.0, d, base='full')
+    for buffer in (0.0, 30.0, 90.0, np.nan):
+        p = cost_model.flight_cost('A320', 1.0, d, base='primary')
+        r = cost_model.flight_cost('A320', 1.0, d, 0.0, buffer, 'rotation')
+        f = cost_model.flight_cost('A320', 1.0, d, base='full')
         assert (p <= r + 1e-9).all() and (r <= f + 1e-9).all()
     # no buffer: every minute propagates, as in Cook's network average
-    assert np.allclose(cost_model.coste_vuelo_vec('A320', 1.0, d, 0.0, 0.0, 'rotation'),
-                       cost_model.coste_vuelo_vec('A320', 1.0, d, base='full'))
+    assert np.allclose(cost_model.flight_cost('A320', 1.0, d, 0.0, 0.0, 'rotation'),
+                       cost_model.flight_cost('A320', 1.0, d, base='full'))
     # night stop (no later rotation): primary only
-    assert np.allclose(cost_model.coste_vuelo_vec('A320', 1.0, d, 0.0, np.nan, 'rotation'),
-                       cost_model.coste_vuelo_vec('A320', 1.0, d, base='primary'))
+    assert np.allclose(cost_model.flight_cost('A320', 1.0, d, 0.0, np.nan, 'rotation'),
+                       cost_model.flight_cost('A320', 1.0, d, base='primary'))
 
 
 def test_delay_absorbed_by_the_turnaround_does_not_propagate():
-    assert cost_model.retraso_propagado([20.0, 50.0, 80.0], 50.0).tolist() == [0.0, 0.0, 30.0]
-    assert cost_model.retraso_propagado([80.0], np.nan).tolist() == [0.0]
+    assert cost_model.propagated_delay([20.0, 50.0, 80.0], 50.0).tolist() == [0.0, 0.0, 30.0]
+    assert cost_model.propagated_delay([80.0], np.nan).tolist() == [0.0]
 
 
 def test_turnaround_buffer_uses_minimum_turnaround_by_category():
-    df = pd.DataFrame({'recat': ['D', 'B', 'D', 'D'], 'tat_programado_min': [60.0, 60.0, 20.0, np.nan]})
-    h = cost_model.holgura_rotacion(df)
+    df = pd.DataFrame({'recat': ['D', 'B', 'D', 'D'], 'scheduled_turnaround_min': [60.0, 60.0, 20.0, np.nan]})
+    h = cost_model.turnaround_buffer(df)
     assert h.iloc[0] == 60 - cost_model.MIN_TURNAROUND_MIN['narrow']
     assert h.iloc[1] == 0          # wide-body: 60 min < 80 min minimum
     assert h.iloc[2] == 0          # scheduled below the minimum: no buffer
@@ -182,11 +182,11 @@ def test_turnaround_buffer_uses_minimum_turnaround_by_category():
 
 
 def test_turnaround_pairs_arrival_with_next_departure_of_same_aircraft():
-    llegadas = pd.DataFrame({'RM': ['ECAAA', 'ECAAA', 'ECBBB', 'ECCCC'],
+    arrivals = pd.DataFrame({'RM': ['ECAAA', 'ECAAA', 'ECBBB', 'ECCCC'],
                              'minutes_eta': [400.0, 600.0, 450.0, 500.0]})
-    salidas = pd.DataFrame({'RM': ['ECAAA', 'ECAAA', 'ECBBB'],
+    departures_df = pd.DataFrame({'RM': ['ECAAA', 'ECAAA', 'ECBBB'],
                             'ETD': ['07:20', '11:00', '06:00']})
-    tat = prep.turnaround_programado(llegadas, salidas)
+    tat = prep.scheduled_turnaround(arrivals, departures_df)
     assert tat.iloc[0] == 40       # 06:40 arrival, 07:20 departure
     assert tat.iloc[1] == 60       # 10:00 arrival, 11:00 departure
     assert np.isnan(tat.iloc[2])   # ECBBB departed before it arrived: night stop
@@ -196,9 +196,9 @@ def test_turnaround_pairs_arrival_with_next_departure_of_same_aircraft():
 def test_turnaround_skips_pairs_with_a_missing_leg():
     # The aircraft arrives twice before the departure: the first arrival is
     # not a turnaround of that departure.
-    llegadas = pd.DataFrame({'RM': ['ECAAA', 'ECAAA'], 'minutes_eta': [400.0, 500.0]})
-    salidas = pd.DataFrame({'RM': ['ECAAA'], 'ETD': ['09:00']})
-    tat = prep.turnaround_programado(llegadas, salidas)
+    arrivals = pd.DataFrame({'RM': ['ECAAA', 'ECAAA'], 'minutes_eta': [400.0, 500.0]})
+    departures_df = pd.DataFrame({'RM': ['ECAAA'], 'ETD': ['09:00']})
+    tat = prep.scheduled_turnaround(arrivals, departures_df)
     assert np.isnan(tat.iloc[0]) and tat.iloc[1] == 40
 
 
@@ -208,16 +208,16 @@ def test_cost_objective_holds_first_the_flights_with_loose_turnarounds():
     df = pd.DataFrame({
         'ARCID': ['TIGHT', 'LOOSE'], 'ATYP': 'A320', 'recat': 'D', 'size_seats_avg': 180,
         'minutes_eta': [400.0, 400.0], 'minutes_etd': 300.0, 'flight_status': FS_CONTROLLED,
-        'airline': 'TST', 'tat_programado_min': [35.0, 125.0],
+        'airline': 'TST', 'scheduled_turnaround_min': [35.0, 125.0],
     })
-    res = ghp.resolver_ghp(df, np.array([400.0, 460.0]), 'cost').set_index('ARCID')
+    res = ghp.solve_ghp(df, np.array([400.0, 460.0]), 'cost').set_index('ARCID')
     assert res.loc['TIGHT', 'total_delay'] == 0
     assert res.loc['LOOSE', 'total_delay'] == 60
 
 
 def test_passenger_scaling_uses_cook_base_load():
     # A320 with 155 seats -> int(155 * 0.837) = 129 pax vs 130 in Cook's base scenario
-    assert cost_model.factor_pasajeros('A320', 155) == pytest.approx(129 / 130)
+    assert cost_model.passenger_factor('A320', 155) == pytest.approx(129 / 130)
 
 
 # -----------------------------------------------------------------------------
@@ -226,10 +226,10 @@ def test_passenger_scaling_uses_cook_base_load():
 
 @pytest.fixture(scope='module')
 def wp3_run():
-    df = prep.preparar_vuelos(config.SAMPLE_TRAFFIC, config.FLEET_TABLE)
-    res_gdp = gdp.ejecutar_nucleo_gdp(df, PARAMS, run_compression=False)
+    df = prep.prepare_flights(config.SAMPLE_TRAFFIC, config.FLEET_TABLE)
+    res_gdp = gdp.run_gdp(df, PARAMS, run_compression=False)
     slots = list(res_gdp['slots']['slot_start_min'])
-    return res_gdp['vuelos_asignados'], ghp.ejecutar_ghp_completo(res_gdp['vuelos_asignados'], slots, PARAMS)
+    return res_gdp['allocation'], ghp.run_ghp(res_gdp['allocation'], slots, PARAMS)
 
 
 def test_validation_task_reproduces_rbs_total_delay(wp3_run):
@@ -239,40 +239,40 @@ def test_validation_task_reproduces_rbs_total_delay(wp3_run):
 
 def test_every_scenario_keeps_total_delay_and_air_delay_feasible(wp3_run):
     rbs, res = wp3_run
-    for clave in ghp.ESCENARIOS.values():
-        assert res[clave]['total_delay'].sum() == pytest.approx(rbs['total_delay'].sum())
-        assert len(res[clave]) == len(rbs)
+    for key in ghp.SCENARIOS.values():
+        assert res[key]['total_delay'].sum() == pytest.approx(rbs['total_delay'].sum())
+        assert len(res[key]) == len(rbs)
     assert res['max_air_delay_ok']
 
 
 def test_cost_objective_never_costs_more_than_rbs(wp3_run):
     rbs, res = wp3_run
     h = PARAMS['H_START']
-    coste_rbs = evaluar_escenario(rbs, 'GDP', h)['Coste_Cook_Total_EUR']
-    coste_ghp = evaluar_escenario(res['GHP_Cost'], 'GHP', h)['Coste_Cook_Total_EUR']
-    assert coste_ghp <= coste_rbs + 1e-6
+    cost_rbs = evaluate_scenario(rbs, 'GDP', h)['delay_cost_total_eur']
+    cost_ghp = evaluate_scenario(res['GHP_Cost'], 'GHP', h)['delay_cost_total_eur']
+    assert cost_ghp <= cost_rbs + 1e-6
 
 
 def test_emissions_objective_never_emits_more_than_rbs(wp3_run):
     rbs, res = wp3_run
     h = PARAMS['H_START']
-    co2_rbs = evaluar_escenario(rbs, 'GDP', h)['CO2_Total_Retraso_kg']
-    co2_ghp = evaluar_escenario(res['GHP_Emissions'], 'GHP', h)['CO2_Total_Retraso_kg']
+    co2_rbs = evaluate_scenario(rbs, 'GDP', h)['delay_co2_kg']
+    co2_ghp = evaluate_scenario(res['GHP_Emissions'], 'GHP', h)['delay_co2_kg']
     assert co2_ghp <= co2_rbs + 1e-6
 
 
 def test_ground_delay_cap_is_respected(wp3_run):
     _, res = wp3_run
-    for clave in ghp.ESCENARIOS.values():
-        assert res[clave]['ground_delay'].max() <= ghp.MAX_GROUND_DELAY_MIN + 1e-9
+    for key in ghp.SCENARIOS.values():
+        assert res[key]['ground_delay'].max() <= ghp.MAX_GROUND_DELAY_MIN + 1e-9
 
 
 def test_cap_below_the_rbs_maximum_is_infeasible():
     # Serving flights in ETA order minimises the maximum delay on identical
     # slots, so no assignment can keep every delay below the RBS maximum.
-    df = prep.preparar_vuelos(config.SAMPLE_TRAFFIC, config.FLEET_TABLE)
-    res_gdp = gdp.ejecutar_nucleo_gdp(df, PARAMS, run_compression=False)
-    rbs = res_gdp['vuelos_asignados']
+    df = prep.prepare_flights(config.SAMPLE_TRAFFIC, config.FLEET_TABLE)
+    res_gdp = gdp.run_gdp(df, PARAMS, run_compression=False)
+    rbs = res_gdp['allocation']
     slots = list(res_gdp['slots']['slot_start_min'])
     with pytest.raises(RuntimeError, match='MAX_GROUND_DELAY_MIN'):
-        ghp.resolver_ghp(rbs, slots, 'cost', max_ground_delay=rbs['ground_delay'].max() - 1)
+        ghp.solve_ghp(rbs, slots, 'cost', max_ground_delay=rbs['ground_delay'].max() - 1)

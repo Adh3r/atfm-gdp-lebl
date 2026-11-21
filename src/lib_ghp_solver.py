@@ -27,7 +27,8 @@
 #     validation  r_f = 1: minimises total delay. Must give the same total
 #                 delay as RBS (Task 1 validation; not a scenario to report:
 #                 every slot permutation of the same slots is optimal).
-#     emissions   c_ft = e_f (t - ETA_f), e_f = ground CO2 per minute (FEGP).
+#     emissions   c_ft = e_f (t - ETA_f), e_f = ground CO2 per minute (APU at
+#                 the gate, ICAO Doc 9889).
 #     cost        c_ft = cost of delay of flight f arriving at t (cost_model):
 #                 Cook & Tanner at-gate primary cost of the delay, plus the
 #                 reactionary cost of the part of the delay that exceeds the
@@ -45,10 +46,10 @@ from scipy.optimize import linear_sum_assignment
 
 from config import FS_CONTROLLED, FS_NOT_AFFECTED
 from cost_model import (
-    DEFAULT_COST_BASE, _tipo_y_factor, co2_tierra_kg_por_min, coste_primario_vec,
-    coste_reactivo_vec, coste_vuelo_vec, holgura_rotacion,
+    DEFAULT_COST_BASE, _cook_type_and_factor, primary_cost, ground_co2_kg_per_min,
+    reactionary_cost, flight_cost, turnaround_buffer,
 )
-from lib_gdp_core import calcular_delays
+from lib_gdp_core import compute_delays
 
 # Maximum feasible air (holding) delay for exempt flights (WP3 Task 1). Project
 # choice, justified in the report; the result is checked in every run.
@@ -64,12 +65,12 @@ MAX_AIR_DELAY_MIN = 90
 MAX_GROUND_DELAY_MIN = 300
 
 # Cost of a forbidden assignment (slot earlier than the flight's ETA).
-_PROHIBIDO = 1e12
+_FORBIDDEN = 1e12
 
-OBJETIVOS = ('validation', 'emissions', 'cost')
+OBJECTIVES = ('validation', 'emissions', 'cost')
 
 # Scenario keys in the results dictionary.
-ESCENARIOS = {
+SCENARIOS = {
     'validation': 'GHP_Validation',
     'emissions':  'GHP_Emissions',
     'cost':       'GHP_Cost',
@@ -80,26 +81,26 @@ ESCENARIOS = {
 # EXEMPT FLIGHTS: served first, in ETA order (air delay)
 # =============================================================================
 
-def asignar_exentos(df_exentos: pd.DataFrame, slots: np.ndarray) -> tuple[dict, set]:
+def assign_exempt(df_exempt: pd.DataFrame, slots: np.ndarray) -> tuple[dict, set]:
     """First free slot at or after the ETA, in ETA order (same rule as RBS)."""
-    asignados, ocupados = {}, set()
-    for idx, eta in df_exentos['minutes_eta'].sort_values(kind='stable').items():
-        libres = [s for s in slots if s >= eta and s not in ocupados]
-        if not libres:
+    assigned, taken = {}, set()
+    for idx, eta in df_exempt['minutes_eta'].sort_values(kind='stable').items():
+        free = [s for s in slots if s >= eta and s not in taken]
+        if not free:
             raise RuntimeError(f"No slot left for exempt flight {idx} (ETA {eta}).")
-        asignados[idx] = libres[0]
-        ocupados.add(libres[0])
-    return asignados, ocupados
+        assigned[idx] = free[0]
+        taken.add(free[0])
+    return assigned, taken
 
 
 # =============================================================================
 # COST MATRIX c_ft FOR THE CONTROLLED FLIGHTS
 # =============================================================================
 
-def matriz_costes(
-    df_controlados: pd.DataFrame,
+def build_cost_matrix(
+    df_controlled: pd.DataFrame,
     slots: np.ndarray,
-    objetivo: str,
+    objective: str,
     max_ground_delay: float | None = MAX_GROUND_DELAY_MIN,
     base: str = DEFAULT_COST_BASE,
     mtt_extra: float = 0.0,
@@ -108,30 +109,30 @@ def matriz_costes(
 
     Forbidden (infinite cost) when t < ETA_f, or when t - ETA_f exceeds
     max_ground_delay. base and mtt_extra select the cost model of the cost
-    objective (cost_model.coste_vuelo_vec), for the sensitivity analysis.
+    objective (cost_model.flight_cost), for the sensitivity analysis.
     """
-    if objetivo not in OBJETIVOS:
-        raise ValueError(f"objetivo must be one of {OBJETIVOS}")
-    eta = df_controlados['minutes_eta'].to_numpy(dtype=float)
+    if objective not in OBJECTIVES:
+        raise ValueError(f"objective must be one of {OBJECTIVES}")
+    eta = df_controlled['minutes_eta'].to_numpy(dtype=float)
     delay = slots[None, :] - eta[:, None]                     # t - ETA_f
-    factible = delay >= -1e-9
+    feasible = delay >= -1e-9
     d = np.clip(delay, 0, None)
 
-    if objetivo == 'validation':
+    if objective == 'validation':
         c = d.copy()
-    elif objetivo == 'emissions':
-        e_f = df_controlados['recat'].map(co2_tierra_kg_por_min).to_numpy(dtype=float)
+    elif objective == 'emissions':
+        e_f = ground_co2_kg_per_min(df_controlled['size_seats_avg'])
         c = e_f[:, None] * d
     else:  # cost
         c = np.empty_like(d)
-        holgura = holgura_rotacion(df_controlados, mtt_extra).to_numpy(dtype=float)
-        for i, (_, fila) in enumerate(df_controlados.iterrows()):
-            tipo, fpax = _tipo_y_factor(fila)
-            c[i] = coste_vuelo_vec(tipo, fpax, d[i], 0.0, holgura[i], base)
+        buffer = turnaround_buffer(df_controlled, mtt_extra).to_numpy(dtype=float)
+        for i, (_, row) in enumerate(df_controlled.iterrows()):
+            cook_type, fpax = _cook_type_and_factor(row)
+            c[i] = flight_cost(cook_type, fpax, d[i], 0.0, buffer[i], base)
 
     if max_ground_delay is not None:
-        factible &= delay <= max_ground_delay + 1e-9
-    c[~factible] = _PROHIBIDO
+        feasible &= delay <= max_ground_delay + 1e-9
+    c[~feasible] = _FORBIDDEN
     return c
 
 
@@ -139,10 +140,10 @@ def matriz_costes(
 # SOLVER
 # =============================================================================
 
-def resolver_ghp(
-    df_afectados: pd.DataFrame,
-    slots_disponibles,
-    objetivo: str,
+def solve_ghp(
+    df_affected: pd.DataFrame,
+    available_slots,
+    objective: str,
     max_ground_delay: float | None = MAX_GROUND_DELAY_MIN,
     base: str = DEFAULT_COST_BASE,
     mtt_extra: float = 0.0,
@@ -154,34 +155,34 @@ def resolver_ghp(
     Raises:
         RuntimeError: if some controlled flight cannot be given a slot.
     """
-    slots = np.array(sorted(slots_disponibles), dtype=float)
-    controlados = df_afectados['flight_status'] == FS_CONTROLLED
-    df_ctrl = df_afectados[controlados]
-    df_exen = df_afectados[~controlados]
+    slots = np.array(sorted(available_slots), dtype=float)
+    controlled_mask = df_affected['flight_status'] == FS_CONTROLLED
+    df_ctrl = df_affected[controlled_mask]
+    df_exempt = df_affected[~controlled_mask]
 
-    asignados, ocupados = asignar_exentos(df_exen, slots)
-    libres = np.array([s for s in slots if s not in ocupados], dtype=float)
+    assigned, taken = assign_exempt(df_exempt, slots)
+    free = np.array([s for s in slots if s not in taken], dtype=float)
 
     if len(df_ctrl):
-        if len(libres) < len(df_ctrl):
+        if len(free) < len(df_ctrl):
             raise RuntimeError("Fewer free slots than controlled flights.")
-        coste = matriz_costes(df_ctrl, libres, objetivo, max_ground_delay, base, mtt_extra)
-        filas, columnas = linear_sum_assignment(coste)
-        if (coste[filas, columnas] >= _PROHIBIDO).any():
+        cost = build_cost_matrix(df_ctrl, free, objective, max_ground_delay, base, mtt_extra)
+        rows, cols = linear_sum_assignment(cost)
+        if (cost[rows, cols] >= _FORBIDDEN).any():
             raise RuntimeError(
                 "Infeasible GHP: a controlled flight has no slot between its ETA and "
                 f"ETA + {max_ground_delay} min (raise MAX_GROUND_DELAY_MIN).")
-        for f, t in zip(filas, columnas):
-            asignados[df_ctrl.index[f]] = libres[t]
+        for f, t in zip(rows, cols):
+            assigned[df_ctrl.index[f]] = free[t]
 
-    res = df_afectados.copy()
-    res['assigned_slot'] = pd.Series(asignados)
-    return calcular_delays(res).sort_values('minutes_eta', kind='stable')
+    res = df_affected.copy()
+    res['assigned_slot'] = pd.Series(assigned)
+    return compute_delays(res).sort_values('minutes_eta', kind='stable')
 
 
-def ejecutar_ghp_completo(
-    df_vuelos_etiquetados: pd.DataFrame,
-    slots_disponibles: list,
+def run_ghp(
+    df_classified: pd.DataFrame,
+    available_slots: list,
     params: dict | None = None,
     verbose: bool = False,
     max_ground_delay: float | None = MAX_GROUND_DELAY_MIN,
@@ -193,28 +194,28 @@ def ejecutar_ghp_completo(
         {'GHP_Validation': df, 'GHP_Emissions': df, 'GHP_Cost': df,
          'max_air_delay_ok': bool}
     """
-    df = df_vuelos_etiquetados[df_vuelos_etiquetados['flight_status'] != FS_NOT_AFFECTED]
-    resultados = {}
-    for objetivo, clave in ESCENARIOS.items():
-        resultados[clave] = resolver_ghp(df, slots_disponibles, objetivo, max_ground_delay)
+    df = df_classified[df_classified['flight_status'] != FS_NOT_AFFECTED]
+    results = {}
+    for objective, key in SCENARIOS.items():
+        results[key] = solve_ghp(df, available_slots, objective, max_ground_delay)
         if verbose:
-            r = resultados[clave]
-            print(f"   [{clave}] total delay {r['total_delay'].sum():.1f} min, "
+            r = results[key]
+            print(f"   [{key}] total delay {r['total_delay'].sum():.1f} min, "
                   f"max {r['total_delay'].max():.1f} min")
-    resultados['max_air_delay_ok'] = all(
-        resultados[k]['air_delay'].max() <= MAX_AIR_DELAY_MIN for k in ESCENARIOS.values()
+    results['max_air_delay_ok'] = all(
+        results[k]['air_delay'].max() <= MAX_AIR_DELAY_MIN for k in SCENARIOS.values()
     )
-    return resultados
+    return results
 
 
 # =============================================================================
 # SENSITIVITY OF THE COST OBJECTIVE (WP3 Task 3: "vary the values of r_f")
 # =============================================================================
 
-def _rsd_aerolineas(df: pd.DataFrame, top_n: int = 4) -> float:
+def _airline_rsd(df: pd.DataFrame, top_n: int = 4) -> float:
     top = df['airline'].value_counts().head(top_n).index
-    medias = df[df['airline'].isin(top)].groupby('airline')['total_delay'].mean()
-    return float(medias.std(ddof=0) / medias.mean() * 100) if medias.mean() > 0 else 0.0
+    means = df[df['airline'].isin(top)].groupby('airline')['total_delay'].mean()
+    return float(means.std(ddof=0) / means.mean() * 100) if means.mean() > 0 else 0.0
 
 
 SENSITIVITY_MODELS = [
@@ -226,16 +227,16 @@ SENSITIVITY_MODELS = [
 ]
 
 
-def sensibilidad_coste(
+def cost_model_sensitivity(
     df_rbs: pd.DataFrame,
-    slots_disponibles,
+    available_slots,
     max_ground_delay: float | None = MAX_GROUND_DELAY_MIN,
 ) -> pd.DataFrame:
     """
     Re-solve the cost GHP with each cost model and evaluate every solution
     under all of them.
 
-    Cost models (cost_model.coste_vuelo_vec): primary only, rotation (the
+    Cost models (cost_model.flight_cost): primary only, rotation (the
     default), Cook's network-average 'full', and rotation with the minimum
     turnaround times shifted by -10 / +15 min.
 
@@ -243,39 +244,39 @@ def sensibilidad_coste(
     the saving against RBS under the model it was optimised for, the maximum
     delay and the airline fairness index.
     """
-    from cost_model import costes_por_vuelo
+    from cost_model import flight_costs
 
     df = df_rbs[df_rbs['flight_status'] != FS_NOT_AFFECTED]
 
-    def coste(sol, base, mtt):
-        return costes_por_vuelo(sol, base=base, mtt_extra=mtt)['coste_retraso_eur'].sum()
+    def cost(sol, base, mtt):
+        return flight_costs(sol, base=base, mtt_extra=mtt)['delay_cost_eur'].sum()
 
-    soluciones = [('GDP (RBS)', None, df)]
-    for base, mtt, nombre in SENSITIVITY_MODELS:
-        soluciones.append((f'GHP cost, optimised on: {nombre}', (base, mtt),
-                           resolver_ghp(df, slots_disponibles, 'cost', max_ground_delay, base, mtt)))
+    solutions = [('GDP (RBS)', None, df)]
+    for base, mtt, name in SENSITIVITY_MODELS:
+        solutions.append((f'GHP cost, optimised on: {name}', (base, mtt),
+                           solve_ghp(df, available_slots, 'cost', max_ground_delay, base, mtt)))
 
-    filas = []
-    for nombre, modelo, sol in soluciones:
-        fila = {'Solution': nombre}
-        for base, mtt, etiqueta in SENSITIVITY_MODELS:
-            fila[f'Cost, {etiqueta} (EUR)'] = round(coste(sol, base, mtt), 0)
-        if modelo is not None:
-            ref = coste(df, *modelo)
-            fila['Saving vs RBS, own model (%)'] = round((ref - coste(sol, *modelo)) / ref * 100, 1)
+    rows = []
+    for name, model, sol in solutions:
+        row = {'Solution': name}
+        for base, mtt, label in SENSITIVITY_MODELS:
+            row[f'Cost, {label} (EUR)'] = round(cost(sol, base, mtt), 0)
+        if model is not None:
+            ref = cost(df, *model)
+            row['Saving vs RBS, own model (%)'] = round((ref - cost(sol, *model)) / ref * 100, 1)
         else:
-            fila['Saving vs RBS, own model (%)'] = 0.0
-        fila['Max delay (min)'] = round(sol['total_delay'].max(), 1)
-        fila['Airline fairness RSD (%)'] = round(_rsd_aerolineas(sol), 1)
-        filas.append(fila)
-    return pd.DataFrame(filas)
+            row['Saving vs RBS, own model (%)'] = 0.0
+        row['Max delay (min)'] = round(sol['total_delay'].max(), 1)
+        row['Airline fairness RSD (%)'] = round(_airline_rsd(sol), 1)
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
 # =============================================================================
 # WP3 FIGURES
 # =============================================================================
 
-def generar_graficas_wp3(escenarios: dict, out_dir: str, top_n: int = 4) -> list[str]:
+def plot_wp3_figures(scenarios: dict, out_dir: str, top_n: int = 4) -> list[str]:
     """
     WP3 figures (SVG), saved in out_dir:
       1. delay CO2 by airline in the emissions scenario (air vs ground);
@@ -283,75 +284,75 @@ def generar_graficas_wp3(escenarios: dict, out_dir: str, top_n: int = 4) -> list
          cost of a tight and of a loose turnaround, and Cook's network average;
       3. mean delay per airline: GDP vs both GHP scenarios (fairness).
 
-    escenarios: {'GDP': df, 'GHP_Emissions': df, 'GHP_Cost': df}
+    scenarios: {'GDP': df, 'GHP_Emissions': df, 'GHP_Cost': df}
     """
     import matplotlib.pyplot as plt
 
     os.makedirs(out_dir, exist_ok=True)
-    rutas = []
-    gdp = escenarios['GDP']
-    aerolineas = gdp['airline'].value_counts().head(top_n).index.tolist()
+    paths = []
+    gdp = scenarios['GDP']
+    airlines = gdp['airline'].value_counts().head(top_n).index.tolist()
 
     # --- 1. CO2 of delay by airline, emissions scenario ---
-    df = escenarios['GHP_Emissions']
-    tasa_aire = df['co2_kg_vuelo'] / df['duracion_vuelo_min'].clip(lower=1)
-    tasa_tierra = df['recat'].map(co2_tierra_kg_por_min)
-    aire = (tasa_aire * df['air_delay']).groupby(df['airline']).sum().reindex(aerolineas, fill_value=0)
-    tierra = (tasa_tierra * df['ground_delay']).groupby(df['airline']).sum().reindex(aerolineas, fill_value=0)
+    df = scenarios['GHP_Emissions']
+    air_rate = df['flight_co2_kg'] / df['block_time_min'].clip(lower=1)
+    ground_rate = ground_co2_kg_per_min(df['size_seats_avg'])
+    air = (air_rate * df['air_delay']).groupby(df['airline']).sum().reindex(airlines, fill_value=0)
+    ground = (ground_rate * df['ground_delay']).groupby(df['airline']).sum().reindex(airlines, fill_value=0)
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.bar(aerolineas, aire, label='Air delay CO₂', color='#1D9E75')
-    ax.bar(aerolineas, tierra, bottom=aire, label='Ground delay CO₂ (FEGP)', color='#9FE1CB')
+    ax.bar(airlines, air, label='Air delay CO₂', color='#1D9E75')
+    ax.bar(airlines, ground, bottom=air, label='Ground delay CO₂ (APU)', color='#9FE1CB')
     ax.set_ylabel('CO₂ (kg)')
     ax.set_xlabel('Airline')
     ax.set_title('Delay CO₂ by airline — GHP, emissions objective')
     ax.legend()
     fig.tight_layout()
-    rutas.append(os.path.join(out_dir, 'fig1_co2_by_airline.svg'))
-    fig.savefig(rutas[-1], format='svg')
+    paths.append(os.path.join(out_dir, 'fig1_co2_by_airline.svg'))
+    fig.savefig(paths[-1], format='svg')
     plt.close(fig)
 
     # --- 2. Cost of delay curves ---
     delays = np.linspace(0, 300, 601)
     fig, ax = plt.subplots(figsize=(9, 5))
-    prim = coste_primario_vec('A320', delays, 'at_gate')
-    curvas = (
+    prim = primary_cost('A320', delays, 'at_gate')
+    curves = (
         ('Primary only (no knock-on)', prim, '#4A6FA5', '-'),
-        ('Turnaround buffer 15 min', prim + coste_reactivo_vec('A320', np.clip(delays - 15, 0, None)), '#E67E22', '-'),
-        ('Turnaround buffer 60 min', prim + coste_reactivo_vec('A320', np.clip(delays - 60, 0, None)), '#2ECC71', '-'),
-        ("Cook & Tanner 'full' (network average)", prim + coste_reactivo_vec('A320', delays), 'gray', '--'),
+        ('Turnaround buffer 15 min', prim + reactionary_cost('A320', np.clip(delays - 15, 0, None)), '#E67E22', '-'),
+        ('Turnaround buffer 60 min', prim + reactionary_cost('A320', np.clip(delays - 60, 0, None)), '#2ECC71', '-'),
+        ("Cook & Tanner 'full' (network average)", prim + reactionary_cost('A320', delays), 'gray', '--'),
     )
-    for etiqueta, y, color, estilo in curvas:
-        ax.plot(delays, y / 1000, label=etiqueta, color=color, linestyle=estilo, linewidth=1.8)
+    for label, y, color, style in curves:
+        ax.plot(delays, y / 1000, label=label, color=color, linestyle=style, linewidth=1.8)
     ax.set_xlabel('Ground delay (min)')
     ax.set_ylabel('Cost of delay (k€, 2014)')
     ax.set_title('Cost of delay of an A320 (Cook & Tanner 2015, at gate, base scenario)')
     ax.legend()
     fig.tight_layout()
-    rutas.append(os.path.join(out_dir, 'fig2_cost_of_delay_curves.svg'))
-    fig.savefig(rutas[-1], format='svg')
+    paths.append(os.path.join(out_dir, 'fig2_cost_of_delay_curves.svg'))
+    fig.savefig(paths[-1], format='svg')
     plt.close(fig)
 
     # --- 3. Fairness: mean delay per airline ---
-    nombres = list(escenarios)
-    medias = pd.DataFrame({
-        n: escenarios[n].groupby('airline')['total_delay'].mean().reindex(aerolineas)
-        for n in nombres
+    names = list(scenarios)
+    means = pd.DataFrame({
+        n: scenarios[n].groupby('airline')['total_delay'].mean().reindex(airlines)
+        for n in names
     })
-    x = np.arange(len(aerolineas))
-    w = 0.8 / len(nombres)
+    x = np.arange(len(airlines))
+    w = 0.8 / len(names)
     fig, ax = plt.subplots(figsize=(9, 5))
-    for k, n in enumerate(nombres):
-        ax.bar(x + (k - (len(nombres) - 1) / 2) * w, medias[n], w, label=n.replace('_', ' '))
+    for k, n in enumerate(names):
+        ax.bar(x + (k - (len(names) - 1) / 2) * w, means[n], w, label=n.replace('_', ' '))
     ax.set_xticks(x)
-    ax.set_xticklabels(aerolineas)
+    ax.set_xticklabels(airlines)
     ax.set_ylabel('Mean delay per flight (min)')
     ax.set_title(f'Mean delay of the {top_n} airlines with most affected flights')
     ax.legend()
     fig.tight_layout()
-    rutas.append(os.path.join(out_dir, 'fig3_fairness_by_airline.svg'))
-    fig.savefig(rutas[-1], format='svg')
+    paths.append(os.path.join(out_dir, 'fig3_fairness_by_airline.svg'))
+    fig.savefig(paths[-1], format='svg')
     plt.close(fig)
-    return rutas
+    return paths
 
 
 # =============================================================================
@@ -365,9 +366,9 @@ if __name__ == '__main__':
     from config import CFG
 
     params = CFG.to_params_dict()
-    df_vuelos = prep.preparar_vuelos(config.traffic_file(), config.FLEET_TABLE)
-    res_gdp = gdp.ejecutar_nucleo_gdp(df_vuelos, params, run_compression=False)
-    rbs = res_gdp['vuelos_asignados']
-    res = ejecutar_ghp_completo(rbs, list(res_gdp['slots']['slot_start_min']), params, verbose=True)
+    df_flights = prep.prepare_flights(config.traffic_file(), config.FLEET_TABLE)
+    res_gdp = gdp.run_gdp(df_flights, params, run_compression=False)
+    rbs = res_gdp['allocation']
+    res = run_ghp(rbs, list(res_gdp['slots']['slot_start_min']), params, verbose=True)
     print(f"RBS total delay: {rbs['total_delay'].sum():.1f} min "
           f"(validation GHP: {res['GHP_Validation']['total_delay'].sum():.1f})")
