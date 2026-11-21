@@ -21,6 +21,7 @@ import os
 import pandas as pd
 
 import lib_gdp_core as gdp
+from cost_model import LOAD_FACTOR_EU
 from lib_ghp_solver import run_ghp
 from lib_metrics import evaluate_scenario, summary_table
 
@@ -33,7 +34,7 @@ STATION_ACCESS_MIN = 40
 STATION_EGRESS_MIN = 20
 CRUISE_SPEED_KT = 440             # air in-vehicle time estimate
 KT_TO_KMH = 1.852
-LOAD_FACTOR = 0.837        # IATA, Europe 2025
+LOAD_FACTOR = LOAD_FACTOR_EU   # IATA, Europe, August 2025
 DEFAULT_SEATS = 180
 
 # Direct HSR services to Barcelona (travel time in hours).

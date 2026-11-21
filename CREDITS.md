@@ -37,6 +37,14 @@ was published; authorship and dates are unchanged.
   Quality Manual*, 2nd edition, Table 3-A1-6; share of APU time from Cook &
   Tanner (2015); ground-power obligations from Regulation (EU) 2023/1804
   (AFIR), Art. 12.
+- **Arrival capacity of LEBL** — EUROCONTROL Performance Review Commission,
+  *Airport Capacity Imbalance* technical note (2020), LEBL section; declared
+  capacity (38 + 40 movements/h) from EUROCONTROL Airport Corner as cited in
+  the El Prat expansion technical study.
+- **Cost price base and turnaround times** — EUROCONTROL, *Standard Inputs
+  for Economic Analyses*, edition 10.0.2 (2026), chapters 16 and 18.
+- **Load factor** — IATA, Air Passenger Market in Detail, August 2025 (Europe
+  87.9 %).
 - **Connecting passengers at LEBL** — Cambra de Comerç de Barcelona,
   *Observatori del Transport Aeri* (2025–2026 editions).
 - **Traffic data** — the LEBL arrivals and departures of 10 August 2025 used for every result

@@ -5,7 +5,8 @@
 #
 # - Cook & Tanner (2015), European airline delay cost reference values v4.1:
 #     tactical cost of delay per flight (Tables 22/24 primary, 26/28 full,
-#     at-gate and en-route), EUR 2014, 15 reference aircraft types, 9 delay
+#     at-gate and en-route), EUR 2014 (converted to EUR 2022), 15 reference
+#     aircraft types, 9 delay
 #     breakpoints. 'Full' costs add the reactionary (knock-on) costs.
 # - Reactionary delay: the delay a late arrival passes on to the next rotation
 #   of the same aircraft (IATA delay code 93) and from there to the network.
@@ -97,8 +98,40 @@ _PAX_BASE_TABLE = {
     'AT72':  52, 'AT43':  36,
 }
 
-# European passenger load factor: 83.7 % (IATA Annual Review 2025).
-LOAD_FACTOR_EU = 0.837
+# Passenger load factor of European airlines in August 2025, the month of the
+# traffic day: 87.9 % (IATA, Air Passenger Market in Detail, August 2025,
+# press release of 30 Sep 2025). The 2025 annual average (83.7 %) would
+# understate the passengers of a peak summer day.
+LOAD_FACTOR_EU = 0.879
+
+# Price base. Cook & Tanner values are in 2014 euros; the EUROCONTROL Standard
+# Inputs for Economic Analyses (edition 10.0.2, 2026, chapter 16) restate them
+# in 2022 prices. Their aircraft table gives the same ratio for every value
+# (A320 at gate, 5/15/30 min: 95/594/2,162 EUR vs 80/500/1,820 EUR 2014), so
+# every cost is multiplied by that factor and reported in EUR 2022.
+PRICE_FACTOR_2014_TO_2022 = 1.188
+
+# Passenger component of the primary tactical cost (hard + soft passenger
+# costs to the airline), EUR 2014, base scenario: Cook & Tanner, 'The cost of
+# passenger delay to airlines in Europe', 2015, Table 12. Only this component
+# scales with the number of passengers; crew, fuel and maintenance do not.
+_COOK_PAX_COST = {
+    'B733': [40, 250, 910, 3320, 6800, 11110, 22180, 36370, 53520],
+    'B734': [40, 290, 1040, 3780, 7750, 12670, 25280, 41470, 61020],
+    'B735': [30, 230, 810, 2950, 6040, 9860, 19690, 32290, 47510],
+    'B738': [40, 330, 1170, 4250, 8700, 14220, 28390, 46570, 68520],
+    'B752': [50, 400, 1420, 5180, 10610, 17340, 34610, 56770, 83520],
+    'B763': [70, 490, 1760, 6420, 13150, 21490, 42900, 70360, 103530],
+    'B744': [110, 790, 2850, 10360, 21220, 34670, 69220, 113530, 167050],
+    'A319': [40, 270, 960, 3510, 7180, 11730, 23420, 38410, 56520],
+    'A320': [40, 310, 1110, 4030, 8260, 13500, 26940, 44190, 65020],
+    'A321': [50, 380, 1350, 4900, 10040, 16400, 32750, 53710, 79020],
+    'AT43': [10, 90, 310, 1120, 2290, 3740, 7460, 12240, 18010],
+    'AT72': [20, 120, 440, 1610, 3300, 5400, 10780, 17680, 26010],
+    'DH8D': [20, 140, 490, 1770, 3620, 5920, 11810, 19380, 28510],
+    'E190': [30, 180, 660, 2390, 4890, 7990, 15960, 26170, 38510],
+    'A332': [80, 550, 1980, 7200, 14740, 24080, 48080, 78860, 116030],
+}
 
 # =============================================================================
 # ICAO TYPE -> COOK & TANNER REFERENCE TYPE (v4.1, 2014)
@@ -346,6 +379,17 @@ def primary_cost(cook_type: str, delays, phase: str = 'at_gate') -> 'np.ndarray'
     return _curve(cook_type, phase, 'primary', delays)
 
 
+def passenger_cost(cook_type: str, delays) -> 'np.ndarray':
+    """Passenger component of the primary cost (Table 12, EUR 2014, Cook base load)."""
+    d = np.clip(np.asarray(delays, dtype=float), 0, None)
+    x = np.array([0] + _DELAY_BREAKPOINTS, dtype=float)
+    y = np.array([0] + _COOK_PAX_COST.get(cook_type, _COOK_PAX_COST['A320']), dtype=float)
+    out = np.interp(d, x, y)
+    beyond = d > x[-1]
+    out[beyond] = y[-1] + (y[-1] - y[-2]) / (x[-1] - x[-2]) * (d[beyond] - x[-1])
+    return out
+
+
 def reactionary_cost(cook_type: str, delays) -> 'np.ndarray':
     """Reactionary cost of a delay passed on to the next rotation.
 
@@ -392,9 +436,11 @@ def flight_cost(
     base: str = DEFAULT_COST_BASE,
 ) -> 'np.ndarray':
     """
-    Cost of delay (EUR 2014) of one flight for an array of delays.
+    Cost of delay (EUR 2022) of one flight for an array of delays.
 
-        primary   = P_gate(ground) + P_enroute(air)
+        primary   = P_gate(ground) + P_enroute(air), with the passenger part
+                    of each (Table 12) scaled by pax_factor (real passengers /
+                    Cook base load) and the rest (crew, fuel, maintenance) not
         'primary' : primary only (lower bound: no knock-on effect).
         'rotation': primary + R(p), where p = max(0, delay - turnaround buffer)
                     is the delay passed on to the aircraft's next departure and
@@ -404,18 +450,21 @@ def flight_cost(
         'full'    : primary + R(delay), Cook & Tanner's network average, which
                     assumes an average buffer (upper bound here).
 
-    All terms are scaled by pax_factor (real passengers / Cook base load).
+    The reactionary term is scaled by pax_factor too: it is mostly passenger
+    cost on the later rotations of the same aircraft. The result is converted
+    to 2022 prices (PRICE_FACTOR_2014_TO_2022).
     """
     if base not in COST_BASES:
         raise ValueError(f"base must be one of {COST_BASES}")
     g = np.clip(np.asarray(ground_delay, dtype=float), 0, None)
     a = np.clip(np.broadcast_to(np.asarray(air_delay, dtype=float), g.shape), 0, None)
-    cost = primary_cost(cook_type, g, 'at_gate') + primary_cost(cook_type, a, 'en_route')
+    extra_pax = (pax_factor - 1.0) * (passenger_cost(cook_type, g) + passenger_cost(cook_type, a))
+    cost = primary_cost(cook_type, g, 'at_gate') + primary_cost(cook_type, a, 'en_route') + extra_pax
     if base == 'full':
-        cost = cost + reactionary_cost(cook_type, g + a)
+        cost = cost + pax_factor * reactionary_cost(cook_type, g + a)
     elif base == 'rotation':
-        cost = cost + reactionary_cost(cook_type, propagated_delay(g + a, buffer))
-    return cost * pax_factor
+        cost = cost + pax_factor * reactionary_cost(cook_type, propagated_delay(g + a, buffer))
+    return cost * PRICE_FACTOR_2014_TO_2022
 
 
 def passenger_factor(cook_type: str, seats) -> float:

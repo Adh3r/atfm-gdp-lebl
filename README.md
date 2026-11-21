@@ -3,13 +3,15 @@
 [![tests](https://github.com/Adh3r/atfm-gdp-lebl/actions/workflows/tests.yml/badge.svg)](https://github.com/Adh3r/atfm-gdp-lebl/actions/workflows/tests.yml)
 
 **Air traffic flow management simulator for Barcelona–El Prat (LEBL).**
-It models a low-visibility capacity drop and compares the ways of absorbing the
-resulting arrival delay: a Ground Delay Program allocated by Ration-By-Schedule,
+It models a severe weather-related capacity drop and compares the ways of
+absorbing the resulting arrival delay: a Ground Delay Program allocated by Ration-By-Schedule,
 Ground Holding optimisation for cost or for CO₂, and replacing short-haul
 flights with high-speed rail.
 
-Built on one real traffic day (10 August 2025, 550 arrivals). The capacity is
-cut from 44 to 20 arrivals/h between 06:00 and 13:00 UTC.
+Built on one real traffic day (10 August 2025, 550 arrivals). The arrival
+capacity is cut from 38 to 20 arrivals/h between 06:00 and 13:00 UTC. 38/h is
+the declared arrival capacity of El Prat's main runway configuration and its
+peak service rate in EUROCONTROL's airport capacity study.
 
 > The project was delivered as coursework in May 2026 and revised in November
 > 2026. The revision fixed several modelling errors; [`CHANGES.md`](CHANGES.md)
@@ -17,40 +19,45 @@ cut from 44 to 20 arrivals/h between 06:00 and 13:00 UTC.
 
 ## Results
 
-The capacity drop builds a queue of about 90 aircraft. It dissolves at 19:14
-UTC (HNoReg), more than six hours after capacity is restored. 415 arrivals are
-affected; 360 of them are held on the ground and 55 are exempt.
+The capacity drop builds a queue of about 90 aircraft. Barcelona's demand
+stays close to its capacity all day (up to 37 arrivals/h), so the queue only
+dissolves at 21:54 UTC (HNoReg), almost nine hours after capacity is restored.
+479 arrivals are affected; 418 of them are held on the ground and 61 are
+exempt.
 
 ![Newell cumulative curves](docs/figures/newell_curves.png)
 
 All methods use the same regulation, slots and affected flights, and absorb the
-same 35,680 minutes of delay. What changes is **who** absorbs it:
+same 45,474 minutes of delay. What changes is **who** absorbs it (costs in
+2022 euros):
 
 | | GDP (RBS) | GHP, min CO₂ | GHP, min cost | GDP + rail | GHP cost + rail |
 |---|---|---|---|---|---|
-| Cost of delay | 8.46 M€ | 9.77 M€ | 6.62 M€ | 6.91 M€ | **5.49 M€** |
-| Delay passed on to next rotations | 18,900 min | 21,700 min | 18,000 min | 15,700 min | **15,100 min** |
-| Delay CO₂ | 77 t | **70 t** | 74 t | 68 t | 66 t |
-| Max delay | **224 min** | 300 min | 300 min | 213 min | 300 min |
-| Airline fairness (RSD of mean delays) | 27 % | 86 % | 41 % | **14 %** | 28 % |
-| HNoReg | 19:14 | 19:14 | 19:14 | **18:09** | 18:09 |
+| Cost of delay | 13.66 M€ | 15.80 M€ | 10.55 M€ | 10.70 M€ | **8.35 M€** |
+| Delay passed on to next rotations | 25,000 min | 29,600 min | 23,100 min | 19,600 min | **18,100 min** |
+| Delay CO₂ | 94 t | **86 t** | 91 t | 81 t | 80 t |
+| Max delay | **225 min** | 300 min | 300 min | 213 min | 300 min |
+| Airline fairness (RSD of mean delays) | 24 % | 50 % | 46 % | **16 %** | 22 % |
+| HNoReg | 21:54 | 21:54 | 21:54 | **20:34** | 20:34 |
 
 ![Cost and CO₂ by method](docs/figures/wp5_cost_and_co2_by_method.png)
 
 - **GHP.** Optimising the slot order on the cost of delay cuts the airline
-  cost by 22 % against Ration-By-Schedule. Most of the saving comes from
+  cost by 23 % against Ration-By-Schedule. Most of the saving comes from
   holding first the aircraft whose next departure has slack, which halves the
   reactionary cost. The price is fairness: the optimiser moves delay onto the
   airlines whose flights are cheaper to delay, and up to the 300-min cap on
   single flights. Minimising CO₂ instead cuts delay CO₂ by 8 % by holding
   the aircraft with the smallest APUs longest, but it costs 16 % *more* than
   RBS and is the least fair allocation: it ignores rotations and airlines.
-  Cost and CO₂ are conflicting objectives.
-- **Rail.** 14 regulated flights (Madrid, Alicante, Marseille) have a direct
-  high-speed-rail alternative. Replacing them ends the regulation 65 minutes
-  earlier, removes 15 % of the delay and saves about 75 t of CO₂: 66 t
-  directly (flights replaced by rail) and 9 t of delay CO₂. Door to door, the train only beats
-  the *delayed* flight on Madrid.
+  Cost and CO₂ are conflicting objectives. Both GHP variants are research
+  benchmarks: the EUROCONTROL Network Manager allocates slots first planned,
+  first served and leaves airlines to reorder their own flights.
+- **Rail.** 17 regulated flights (12 Madrid, 4 Alicante, 1 Marseille) have a
+  direct high-speed-rail alternative. Replacing them ends the regulation 80
+  minutes earlier, removes 16 % of the delay and saves about 87 t of CO₂:
+  75 t directly (flights replaced by rail) and 12 t of delay CO₂. Door to
+  door, the train only beats the *delayed* flight on Madrid (246 vs 272 min).
 
 ![Fairness by airline](docs/figures/wp3_fairness_by_airline.png)
 ![Queue with and without rail substitution](docs/figures/wp4_queue_newell.png)
@@ -58,7 +65,9 @@ same 35,680 minutes of delay. What changes is **who** absorbs it:
 ### Cost of delay and reactionary delay
 
 The cost of delaying a flight comes from the Cook & Tanner (2015) tactical cost
-tables, scaled by its real passengers. A late arrival also delays the next
+tables, the reference of the EUROCONTROL Standard Inputs, in 2022 prices as in
+their latest edition. Only the passenger component is scaled by the flight's
+real passengers (seats × the August 2025 European load factor). A late arrival also delays the next
 departure of the same aircraft when the delay exceeds the turnaround buffer.
 That is reactionary delay, IATA code 93. The buffer is the scheduled ground
 time before the next departure (found through the registration mark) minus a
@@ -83,7 +92,7 @@ the full cost matrix c<sub>ft</sub> = r<sub>f</sub>(t)·(t − ETA<sub>f</sub>).
 non-linear cost curve can be used directly, with no linearisation. The tests
 check the solver against an independent MILP formulation and against brute
 force. The whole pipeline, including 42 sensitivity runs and eleven GHP
-instances, runs in about 35 s.
+instances, runs in under a minute.
 
 ## What it does
 
@@ -103,7 +112,7 @@ python -m venv .venv
 pip install -r requirements.txt
 
 cd src
-python main.py                  # full pipeline, about 35 s
+python main.py                  # full pipeline, under a minute
 ```
 
 Outputs are written to `data/processed/` (CSV tables and `audit_workbook.xlsx`)
@@ -133,6 +142,29 @@ data/processed/   generated tables      (git-ignored)
 output/figures/   generated figures     (git-ignored)
 ```
 
+## Assumptions and limitations
+
+- **Scenario.** The capacity drop is stylised: fog is rare at Barcelona in
+  summer, and thunderstorms are the usual summer capacity limiter. The
+  scenario stands for any severe weather reduction of the arrival rate.
+- **Demand is fixed.** Airlines do not cancel or retime flights on their own
+  during the regulation, except in the WP2 cancellation exercise.
+- **Exemptions follow the course.** Every non-ECAC origin is exempt. In the
+  real Network Manager system, flights departing from the ATFM adjacent area
+  (here 13 flights from Morocco, Algeria, Egypt and Kosovo) also get slots.
+- **Cost model.** Cook & Tanner (2015) is still the most recent European
+  reference; types newer than its tables (A320neo, A220, A350, 787) are
+  mapped to the closest reference type. Reactionary costs are scaled by
+  passengers like the primary passenger costs. Connecting passengers are
+  covered by Cook & Tanner's network averages (about 9–10 % of passengers
+  connect at Barcelona); the traffic file has no flight-level connection data.
+- **Emissions.** 3.16 kg CO₂ per kg of fuel, as the course asks
+  (EUROCONTROL uses 3.15 in SESAR studies). Distances are great-circle, which
+  slightly understates the distance actually flown.
+- **Turnarounds.** The 35-min minimum for narrow-bodies comes from the course
+  material; low-cost operators schedule down to 25 min, which the cost
+  sensitivity (−10 min) covers. Rail journey times are fixed per route.
+
 ## Terminology
 
 The code and outputs follow the vocabulary of the MGTA course, which teaches
@@ -149,7 +181,7 @@ ATFM uses different names for the same ideas:
 | HNoReg | end of the regulation: the queue has dissolved | — |
 | CTD (EDCT) / CTA | Controlled Time of Departure / of Arrival | CTOT (Calculated Take-Off Time) / CTA |
 | Controlled | flight that receives ground delay | regulated flight |
-| ExemptFlying / ExemptInternational / ExemptRadius | exempt: airborne or ready to depart at Hfile / non-ECAC origin / beyond the radius | flights not subject to the regulation |
+| ExemptFlying / ExemptInternational / ExemptRadius | exempt: airborne or ready to depart at Hfile / non-ECAC origin / beyond the radius | flights not subject to the regulation (departures outside the ATFM area and adjacent area, certain flight types); there is no radius rule |
 | NotAffected | ETA outside [Hstart, HNoReg) | — |
 | GHP, Ground Holding Problem | slot assignment as an integer programme with costs c<sub>ft</sub> = r<sub>f</sub>(t)·(t − ETA<sub>f</sub>) | — (research model) |
 | Unrecoverable delay | ground delay already absorbed if the GDP is cancelled at Hstart | — |

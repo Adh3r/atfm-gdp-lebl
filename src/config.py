@@ -48,7 +48,14 @@ class AirportConfig:
 
     PARAMETERS (names as in the MGTA course, after the FAA GDP literature):
         AAR:             Airport Acceptance Rate: arrivals/hour accepted in
-                         nominal conditions.
+                         nominal conditions. 38: peak service rate (99th
+                         percentile of hourly arrivals) of the dominant LEBL
+                         configuration (ARR 25R / DEP 25L) in EUROCONTROL PRC,
+                         Airport Capacity Imbalance (2020), and the arrival
+                         share of the declared capacity (78 = 38 arrivals + 40
+                         departures). The delivered project used 44, the
+                         maximum hourly arrivals ever observed, which is not a
+                         sustainable capacity.
         PAAR:            (GDP) Program Airport Acceptance Rate: arrivals/hour
                          accepted while the GDP is active (here, low-visibility
                          procedures).
@@ -69,7 +76,7 @@ class AirportConfig:
         HNoReg (end time of the regulation, when the queue has dissolved) is
         not a parameter: it is computed from the Newell curves.
     """
-    AAR:             int = 44    # arrivals/hour, nominal
+    AAR:             int = 38    # arrivals/hour, nominal (see below)
     PAAR:            int = 20    # arrivals/hour, during the GDP
     H_START:         int = 360   # 06:00 UTC
     H_END:           int = 780   # 13:00 UTC

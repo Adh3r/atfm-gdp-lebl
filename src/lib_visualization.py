@@ -211,7 +211,7 @@ def plot_cost_vs_do_nothing(df_rbs: pd.DataFrame, out_path: str) -> None:
     plt.figure(figsize=(10, 6))
     bars = plt.bar(labels, values_list, color=['crimson', 'mediumseagreen'], edgecolor='black', width=0.6)
     plt.title("Cost of delay: GDP vs. do-nothing", fontsize=14, fontweight='bold')
-    plt.ylabel("Cost of delay, Cook & Tanner 2015 (EUR 2014)", fontsize=12)
+    plt.ylabel("Cost of delay, Cook & Tanner 2015 (EUR, 2022 prices)", fontsize=12)
 
     vmax_bar = max(values_list)
     plt.ylim(0, vmax_bar * 1.30)

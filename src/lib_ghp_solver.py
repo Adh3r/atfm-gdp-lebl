@@ -46,8 +46,8 @@ from scipy.optimize import linear_sum_assignment
 
 from config import FS_CONTROLLED, FS_NOT_AFFECTED
 from cost_model import (
-    DEFAULT_COST_BASE, _cook_type_and_factor, primary_cost, ground_co2_kg_per_min,
-    reactionary_cost, flight_cost, turnaround_buffer,
+    DEFAULT_COST_BASE, _cook_type_and_factor, flight_cost, ground_co2_kg_per_min,
+    turnaround_buffer,
 )
 from lib_gdp_core import compute_delays
 
@@ -314,17 +314,18 @@ def plot_wp3_figures(scenarios: dict, out_dir: str, top_n: int = 4) -> list[str]
     # --- 2. Cost of delay curves ---
     delays = np.linspace(0, 300, 601)
     fig, ax = plt.subplots(figsize=(9, 5))
-    prim = primary_cost('A320', delays, 'at_gate')
+    def a320(buffer, base):
+        return flight_cost('A320', 1.0, delays, 0.0, buffer, base)
     curves = (
-        ('Primary only (no knock-on)', prim, '#4A6FA5', '-'),
-        ('Turnaround buffer 15 min', prim + reactionary_cost('A320', np.clip(delays - 15, 0, None)), '#E67E22', '-'),
-        ('Turnaround buffer 60 min', prim + reactionary_cost('A320', np.clip(delays - 60, 0, None)), '#2ECC71', '-'),
-        ("Cook & Tanner 'full' (network average)", prim + reactionary_cost('A320', delays), 'gray', '--'),
+        ('Primary only (no knock-on)', a320(np.nan, 'primary'), '#4A6FA5', '-'),
+        ('Turnaround buffer 15 min', a320(15.0, 'rotation'), '#E67E22', '-'),
+        ('Turnaround buffer 60 min', a320(60.0, 'rotation'), '#2ECC71', '-'),
+        ("Cook & Tanner 'full' (network average)", a320(np.nan, 'full'), 'gray', '--'),
     )
     for label, y, color, style in curves:
         ax.plot(delays, y / 1000, label=label, color=color, linestyle=style, linewidth=1.8)
     ax.set_xlabel('Ground delay (min)')
-    ax.set_ylabel('Cost of delay (k€, 2014)')
+    ax.set_ylabel('Cost of delay (k€, 2022 prices)')
     ax.set_title('Cost of delay of an A320 (Cook & Tanner 2015, at gate, base scenario)')
     ax.legend()
     fig.tight_layout()

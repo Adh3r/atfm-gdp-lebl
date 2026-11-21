@@ -87,7 +87,7 @@ def plot_queues(timeline_base, timeline_reduced, h_noreg_base, h_noreg_reduced, 
                 f'({h_noreg_base - h_noreg_reduced} min earlier)',
                 xy=(h_noreg_reduced / 60, 1), xytext=(h_noreg_reduced / 60 + 0.6, timeline_base['queue_size'].max() * 0.45),
                 arrowprops=dict(arrowstyle='->'), fontsize=10)
-    ax.set_xlim(4, 22)
+    ax.set_xlim(4, 24)
     ax.set_xlabel('Time (UTC hour)')
     ax.set_ylabel('Aircraft in queue (Newell)')
     ax.set_title('Arrival queue: baseline vs rail substitution')

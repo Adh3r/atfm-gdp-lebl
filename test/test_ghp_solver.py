@@ -135,8 +135,9 @@ def test_cost_tables_match_cook_and_tanner_reference_values():
     assert prim('A320', [5], 'at_gate')[0] == 90           # Table 22
     assert prim('A320', [60], 'en_route')[0] == 6650       # Table 24
     full = cost_model.flight_cost
-    assert full('A320', 1.0, [60.0], base='full')[0] == 8350                      # Table 26
-    assert full('B744', 1.0, 0.0 * np.ones(1), [300.0], base='full')[0] == 343600  # Table 28
+    k = cost_model.PRICE_FACTOR_2014_TO_2022                                       # EUR 2014 -> 2022
+    assert full('A320', 1.0, [60.0], base='full')[0] == pytest.approx(8350 * k)     # Table 26
+    assert full('B744', 1.0, 0.0 * np.ones(1), [300.0], base='full')[0] == pytest.approx(343600 * k)  # Table 28
     # beyond 300 min the last segment is extended
     assert prim('A320', [360], 'at_gate')[0] == pytest.approx(67820 + (67820 - 46430))
 
@@ -216,8 +217,19 @@ def test_cost_objective_holds_first_the_flights_with_loose_turnarounds():
 
 
 def test_passenger_scaling_uses_cook_base_load():
-    # A320 with 155 seats -> int(155 * 0.837) = 129 pax vs 130 in Cook's base scenario
-    assert cost_model.passenger_factor('A320', 155) == pytest.approx(129 / 130)
+    # A320 with 155 seats -> int(155 * 0.879) = 136 pax vs 130 in Cook's base scenario
+    assert cost_model.passenger_factor('A320', 155) == pytest.approx(136 / 130)
+
+
+def test_only_the_passenger_part_of_the_primary_cost_scales_with_passengers():
+    # Doubling the passengers adds exactly one more passenger component
+    # (Cook & Tanner passenger-cost Table 12); crew, fuel and maintenance stay.
+    k = cost_model.PRICE_FACTOR_2014_TO_2022
+    one = cost_model.flight_cost('A320', 1.0, [60.0], base='primary')[0]
+    two = cost_model.flight_cost('A320', 2.0, [60.0], base='primary')[0]
+    assert one == pytest.approx(4590 * k)                      # Table 22
+    assert two - one == pytest.approx(4030 * k)                # Table 12, A320 at 60 min
+    assert two < 2 * one
 
 
 # -----------------------------------------------------------------------------

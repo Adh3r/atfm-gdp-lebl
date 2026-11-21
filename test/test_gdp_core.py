@@ -199,10 +199,11 @@ def test_ground_co2_uses_apu_fuel_at_the_gate():
     # do-nothing puts all 40 min in the air at each flight's cruise rate
     assert k['co2_savings'] == pytest.approx(30 * 6000 / 60 - 30 * apu, abs=0.01)
     # cost: the same Cook & Tanner model as WP3; holding 30 min at the gate
-    # instead of en route saves the en-route minus at-gate primary cost
-    cook_type, fpax = cost_model._cook_type_and_factor(df.iloc[0])
+    # instead of en route saves the en-route minus at-gate primary cost (the
+    # passenger part is the same in both phases), in 2022 prices
+    cook_type, _ = cost_model._cook_type_and_factor(df.iloc[0])
     saving = (cost_model.primary_cost(cook_type, [30.0], 'en_route')
-              - cost_model.primary_cost(cook_type, [30.0], 'at_gate'))[0] * fpax
+              - cost_model.primary_cost(cook_type, [30.0], 'at_gate'))[0] * cost_model.PRICE_FACTOR_2014_TO_2022
     assert k["cost_savings"] == pytest.approx(saving, abs=0.01)
 
 
